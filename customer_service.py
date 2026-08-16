@@ -170,17 +170,69 @@ def _is_stock_question(q):
     """判断客户是不是在问库存/现货/能否提车"""
     return any(w in q for w in ("库存", "现货", "有货", "还有", "能提", "提车", "现车", "货源", "有没有货", "有现车"))
 
-def _extract_model(question, hits):
-    """从问题/检索结果里找"库存表里的车型"——只有这些有 CHECK_STOCK 真实数据，别拿其他车型去查"""
+def _extract_model(question, hits=None):
+    """从问题里找"库存表里的车型"——只有这些有 CHECK_STOCK 真实数据，别拿其他车型去查。
+    只认问题本身点名的车型；hits 检索结果不作数（v5.9 修：开列型问题「今天能提哪些」
+    会捞到竞品行/参数说明行里的别的车型名，拿去代调 CHECK_STOCK 就答错了）。"""
     nq = _norm(question)
     for name in STOCK:
         if _norm(name) in nq:
             return name
-    for b in hits:
-        nb = _norm(b)
-        for name in STOCK:
-            if _norm(name) in nb:
-                return name
+    return None
+
+def _open_stock_answer():
+    """开列/反问型库存问题（客户没点车型，只问"有没有现车/能提哪些"）的确定性回答：
+    直接把有现货的车型列出来再反问，比干巴巴一句"想了解哪款"更帮忙；数据来自 STOCK，绝不编。"""
+    names = "、".join(f"首驱{name}" for name, n in STOCK.items() if n > 0)
+    if names:
+        return f"目前有现货可以提的车型：{names}。您具体想看哪款车？我帮您查库存和价格。"
+    return "目前店里现货不多，多数车型需要预订。您具体想看哪款车？我帮您查库存和价格。"
+
+# ============ 4.7 竞品"有没有"确定性护栏（v5.9） ============
+# 背景：客户问"店里有没有雅迪冠能E9 PRO？"这类"店里有没有竞品车"时，
+# 检索会把竞品-行整段捞进上下文，模型看到完整参数就顺着编"有在售的"——这是大错。
+# 修法：命中"有没有/有卖/在售" + 竞品品牌/竞品车型 → 代码直接答"没有"，不劳烦模型（与库存保险同理）。
+_COMP_BRANDS = ("雅迪", "小牛", "九号", "极核")
+
+def _kb_competitor_models():
+    """从知识库竞品行提取竞品车型名（'雅迪冠能E9 PRO：…'、竞品行'代表车型：…、…'）"""
+    names = set()
+    for block in kb:
+        if block.startswith("竞品-"):
+            m = re.search(r'代表车型：([^\n]+)', block)
+            if m:
+                for n in re.split(r'[、,，]', m.group(1)):
+                    n = n.strip()
+                    if n:
+                        names.add(n)
+        elif re.match(r'^(雅迪|小牛|九号|极核)[^：:]+：', block):
+            m = re.match(r'^([^：:]+)：', block)
+            if m:
+                names.add(m.group(1).strip())
+    return names
+
+_COMP_MODELS = _kb_competitor_models()
+
+def _competitor_avail(question):
+    """客户问"店里有没有/有卖/在售"竞品车吗？命中返回竞品车型名（如'雅迪冠能E9 PRO'），否则 None。
+    只认"问有没有"的，绝不误伤"哪个好/怎么选/比"这类对比题；售后/服务类问法不拦。"""
+    if any(w in question for w in ("售后", "维修", "服务", "保修", "以旧换新")):
+        return None
+    if not re.search(r'有没有|有卖|有没有卖|在售|有现货|有现车|有货|卖.{0,8}(吗|么|？)', question):
+        return None
+    nq = _norm(question)
+    for brand in _COMP_BRANDS:
+        if brand in question:
+            i = question.find(brand)
+            rest = question[i + len(brand):]
+            m = re.match(r'[^有的？?。,.，！!吗么]+', rest)  # 停在"有/的/标点/语气词"前
+            if m and m.group(0).strip():
+                return brand + m.group(0).strip()
+            return brand
+    # 没带品牌，但问的是资料里明确的竞品车型（如"冠能E9 PRO"）
+    for name in _COMP_MODELS:
+        if _norm(name) in nq:
+            return name
     return None
 
 def _stock_answer_from_result(result, model_name):
@@ -244,7 +296,8 @@ def ask(question, hits, history=None, max_steps=6):
         "6) 回答用纯文本，禁止用任何 Markdown 符号——不要用 ** 星号加粗（别写'**电池**：'，直接写'电池：'）、不要用 # 标题、不要用 - 项目符号。"
         "7) 车型名必须严格照价目表原文，禁止自己拼造型号名（价目表只有'K1 95CV MAX'，不能说成'K1 95C MAX'）。客户问的型号价目表里没有，就答'店里没有这个型号，相近的有 XX、XX，您指的是哪款？'，绝不能用相近车型的参数冒名顶替。"
         "8) 客户没问库存/现货/提车时，绝对不要主动提库存——不要追加'需要我帮您查一下库存吗'、'要不要帮您查现货'这类话，也不要反问'您想了解哪款车的库存'。只答客户问的，客户没问库存，这个话题就到此为止。"
-        "9) 本店只卖首驱，不卖雅迪/小牛/九号/极核等竞品。客户主动提到竞品品牌或要求对比（'哪个好/怎么选/和XX比/对比'）时，才用资料里的'竞品-'和'对比-'行做客观对比：先一句'本店只卖首驱，但可以帮您对比'，再点出首驱优势（智能配置/动力/性价比），有需要可引用'首驱卖点-'行；客户没提竞品、只问首驱自家车时，绝不主动扯竞品。\n\n"
+        "9) 本店只卖首驱，不卖雅迪/小牛/九号/极核等竞品。客户主动提到竞品品牌或要求对比（'哪个好/怎么选/和XX比/对比'）时，才用资料里的'竞品-'和'对比-'行做客观对比：先一句'本店只卖首驱，但可以帮您对比'，再点出首驱优势（智能配置/动力/性价比），有需要可引用'首驱卖点-'行；客户没提竞品、只问首驱自家车时，绝不主动扯竞品。"
+        "10) 客户问资料里没写的具体参数（大灯类型/亮度、整备重量、车身尺寸、防水等级等），就说'这个参数资料没标注，以实车和购车合同为准，可到店看实车'，绝不许编一个参数名——例如资料没写某车型的大灯，就别说'LED大灯/双透镜大灯'；资料里写了的（电池/续航/极速/功率/电机/制动/屏幕/解锁/安全）照实答。\n\n"
         "店内价目表资料：\n" + "\n".join(hits) + "\n\n"
         "资料说明：'首驱...'行是店内价目表（在售车型）；'竞品-...'行是竞品参考（店里不卖，仅对比用）；'首驱卖点-...'行是首驱品牌卖点；'对比-...'行是横向对比话术。只有客户提到竞品或要求对比时才引用后三类，平时只答首驱自家车。\n\n"
         "计算器工具：需要做加减乘除时，必须输出 CALC:<表达式>，例如 CALC:3*4599\n"
@@ -281,12 +334,17 @@ def ask(question, hits, history=None, max_steps=6):
             if _is_stock_question(question) and not any("库存查询" in t for t in used_tools):
                 target = _extract_model(question, hits)
                 if target:
+                    # 客户问题里点明了车型 → 代调真实库存，塞回上下文再让老师傅答
                     stock_result, _ = run_tool(f"CHECK_STOCK:{target}")
                     used_tools.append(stock_result)
                     forced_stock = True
                     messages.append({"role": "assistant", "content": f"CHECK_STOCK:{target}"})
                     messages.append({"role": "user", "content": stock_result})
                     continue  # 带真实库存再让老师傅答一轮
+                # 客户没点任何车型（只问"有没有现车/今天能提哪些"）→ 别拿检索结果里捞到的车型去代调
+                # （v5.9 修：捞错车型会带偏，老师傅顺着"无现货"就编"店里没现货"）。
+                # 直接确定性回答：列出现货车型 + 反问想看哪款。
+                return _open_stock_answer(), used_tools
             # 兜底：代调过库存，但老师傅最终还是没按真实库存说 → 模板答案顶上
             if forced_stock:
                 real = next((t for t in reversed(used_tools) if "库存查询" in t), None)
@@ -357,6 +415,12 @@ def serve(question, log=True, return_tools=False, history=None):
             if log:
                 log_chat(question, REFUSE_MSG, [], used_tools=["SHUNT_REFUSE"])
             return (REFUSE_MSG, ["SHUNT_REFUSE"]) if return_tools else REFUSE_MSG
+    comp = _competitor_avail(question)  # 问"店里有没有竞品车"→ 确定性答没有（v5.9 护栏，不劳烦模型）
+    if comp:
+        answer = f"本店只卖首驱，{comp} 店里没有。想看首驱的哪款车？我帮您介绍。"
+        if log:
+            log_chat(question, answer, [], used_tools=["COMPETITOR_AVAIL"])
+        return (answer, ["COMPETITOR_AVAIL"]) if return_tools else answer
     hits = retrieve(question)
     answer, used_tools = ask(question, hits, history=history)  # 检索不到也让守则+工具兜底（查库存/算账不依赖知识库）
     answer = _de_markdown(answer)  # 剥掉 Markdown 符号：聊天框是纯文本，不能给客户看 **点点**
