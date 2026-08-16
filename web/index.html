@@ -31,6 +31,15 @@
     content: "···"; animation: blink 1s infinite; letter-spacing: 2px;
   }
   @keyframes blink { 0%,100% { opacity: .3; } 50% { opacity: 1; } }
+  .chips {
+    flex-shrink: 0; display: flex; gap: 8px; padding: 8px 12px; background: #fff;
+    border-top: 1px solid #f0f0f0; overflow-x: auto;
+  }
+  .chips button {
+    flex-shrink: 0; border: 1px solid #ffd5c4; background: #fff7f3; color: #e04e12;
+    border-radius: 16px; padding: 6px 13px; font-size: 13px; cursor: pointer;
+  }
+  .chips button:active { background: #ffe4d8; }
   footer {
     flex-shrink: 0; display: flex; gap: 8px; padding: 10px 12px; background: #fff;
     border-top: 1px solid #eee;
@@ -50,9 +59,15 @@
 </head>
 <body>
 <header>首驱电动车店 · 智能客服
-  <small>可问价格 · 续航 · 库存 · 算账 · 售后</small>
+  <small>可问价格 · 续航 · 库存 · 算账 · 售后 · 对比竞品</small>
 </header>
 <div id="chat"><div class="welcome">正在连接客服…</div></div>
+<div class="chips">
+  <button data-q="雅迪和首驱哪个好？">和雅迪比</button>
+  <button data-q="九号和首驱怎么选？">和九号比</button>
+  <button data-q="首驱电动车有什么卖点？">首驱卖点</button>
+  <button data-q="首驱S300和九号E300P比哪个强？">旗舰对比</button>
+</div>
 <footer>
   <input id="input" type="text" placeholder="比如：首驱 Sz110 多少钱？" autocomplete="off">
   <button id="send" disabled>发送</button>
@@ -139,10 +154,19 @@
     send.disabled = busy || !input.value.trim();
   });
 
+  // 快捷对比按钮：点一下直接发问（对比竞品 / 首驱卖点）
+  var chips = document.querySelector('.chips');
+  chips.addEventListener('click', function (e) {
+    var btn = e.target.closest('button');
+    if (!btn || busy) return;
+    var q = btn.getAttribute('data-q');
+    if (q) { input.value = ''; ask(q); }
+  });
+
   // 欢迎语
   var w = document.querySelector('.welcome');
   if (w) w.textContent = '';
-  addMsg('bot', '您好，我是首驱电动车店客服。可以问我价格、续航、库存、算账，比如「首驱Sz110多少钱？」');
+  addMsg('bot', '您好，我是首驱电动车店客服。可以问我价格、续航、库存、算账，还能帮您对比雅迪/小牛/九号/极核，比如「首驱和雅迪哪个好？」');
   input.focus();
 })();
 </script>

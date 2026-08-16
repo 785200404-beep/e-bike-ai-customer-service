@@ -9,9 +9,14 @@
     </view>
   </scroll-view>
 
+  <scroll-view class="chips" scroll-x="true" show-scrollbar="false">
+    <view class="chip" wx:for="{{suggestions}}" wx:key="label"
+          data-q="{{item.q}}" bindtap="onSuggest">{{item.label}}</view>
+  </scroll-view>
+
   <view class="bar">
     <input class="input" value="{{draft}}" bindinput="onInput" bindconfirm="onSend"
-           placeholder="问问价格、库存、续航…" confirm-type="send" />
+           placeholder="问问价格、库存、续航、竞品对比…" confirm-type="send" />
     <button class="send" bindtap="onSend" disabled="{{loading}}">发送</button>
   </view>
 </view>

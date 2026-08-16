@@ -46,6 +46,31 @@
   color: #999999;
 }
 
+.chips {
+  flex-shrink: 0;
+  display: flex;
+  white-space: nowrap;
+  padding: 12rpx 20rpx 4rpx;
+  background: #ffffff;
+  border-top: 1rpx solid #f0f0f0;
+}
+
+.chip {
+  display: inline-block;
+  margin-right: 16rpx;
+  padding: 8rpx 24rpx;
+  border-radius: 30rpx;
+  border: 1rpx solid #ffd5c4;
+  background: #fff7f3;
+  color: #e04e12;
+  font-size: 24rpx;
+  line-height: 1.4;
+}
+
+.chip:active {
+  background: #ffe4d8;
+}
+
 .bar {
   display: flex;
   align-items: center;

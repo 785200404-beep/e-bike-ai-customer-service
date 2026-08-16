@@ -18,14 +18,28 @@ function getSessionId() {
 Page({
   data: {
     messages: [
-      { role: 'bot', content: '您好，我是首驱电动车店客服。可以问我价格、续航、库存、算账，比如「首驱Sz110多少钱？」' }
+      { role: 'bot', content: '您好，我是首驱电动车店客服。可以问我价格、续航、库存、算账，还能帮您对比雅迪/小牛/九号/极核，比如「首驱和雅迪哪个好？」' }
     ],
     draft: '',
     loading: false,
+    // 快捷对比按钮：点一下直接发问
+    suggestions: [
+      { q: '雅迪和首驱哪个好？', label: '和雅迪比' },
+      { q: '九号和首驱怎么选？', label: '和九号比' },
+      { q: '首驱电动车有什么卖点？', label: '首驱卖点' },
+      { q: '首驱S300和九号E300P比哪个强？', label: '旗舰对比' },
+    ],
   },
 
   onInput(e) {
     this.setData({ draft: e.detail.value })
+  },
+
+  onSuggest(e) {
+    const q = (e.currentTarget.dataset.q || '').trim()
+    if (!q || this.data.loading) return
+    this.setData({ draft: q })
+    this.onSend()
   },
 
   onSend() {

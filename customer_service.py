@@ -61,6 +61,25 @@ def _de_markdown(s):
     s = re.sub(r'([0-9])\n([A-Za-z]+(?=[，。,.、]))', r'\1\2', s)       # "4600\nW，" 数字断行拼回去
     return s.strip()
 
+def _strip_proactive_stock(answer, question):
+    """防客服嘴碎：客户没问库存，模型却爱在答尾追加'需要我帮您查一下库存吗'这类主动推销。
+    这类句子整句剥掉；客户本来就在问库存/现货时不动（那是真需求，评估也要考）。"""
+    if any(w in question for w in ("库存", "现货", "有货", "提车", "现车", "提走", "货源", "能提")):
+        return answer
+    parts = re.split(r'(?<=[。！？!?；;])', answer)   # 按句号/问号切句
+    while parts:
+        tail = parts[-1].strip()
+        if not tail:
+            parts.pop()
+            continue
+        # 末尾句子同时含"库存/现货"和"需要/帮/要不要/查一下" → 是主动推销库存，剥掉
+        if re.search(r'(库存|现货)', tail) and re.search(r'(需要|帮|要不要|查一下|查查)', tail):
+            parts.pop()
+        else:
+            break
+    cleaned = ''.join(parts).strip()
+    return cleaned if cleaned else answer
+
 # 系列问法：「K系列 / Sz系列 / 店里有哪些O系」→ 直接把整个系列捞出来
 # （不然 n-gram 打分对单字母系列 K/S/Y/O 会捞空——车型名是「K1 95CV」，查询里的「k系」匹配不上）
 _SERIES_RE = re.compile(r'(?:首驱|店里|你们|我们|在售|有)?\s*([A-Za-z]{1,2})[0-9]*\s*(?:系列|系)')
@@ -104,8 +123,14 @@ def run_tool(content):
     if m:
         expr = m.group(1).strip()
         if re.fullmatch(r'[0-9+\-*/.() ]+', expr):  # 安全校验：只许数字和运算符
-            result = eval(expr)  # 教学演示；生产要换安全执行器
-            return f"计算器结果：{expr} = {result}", True
+            try:
+                result = eval(expr)  # 教学演示；生产要换安全执行器
+                return f"计算器结果：{expr} = {result}", True
+            except Exception:
+                # 表达式算不出来（模型偶发输出被截断的 "CALC:2 *"）→ 剥掉这次调用，当没调过，
+                # 别让客服崩（评估/上线兜底：宁可答不全，不能炸）
+                clean = re.sub(r'CALC:[0-9+\-*/.() ]+', '', content).strip()
+                return (clean if clean else content), False
     s = re.search(r'CHECK_STOCK:\s*([^。\n]+)', content)
     if s:
         target = s.group(1).strip().strip("，,。.;； ")
@@ -123,8 +148,49 @@ def run_tool(content):
             if n > 0:
                 return f"库存查询结果：{hit} 现货 {n} 台，可以提车。", True
             return f"库存查询结果：{hit} 目前无现货，可预订，到货时间以门店为准。", True
+        # 没匹配到库存表 → 查一下是不是店里在售车型（在售但库存表没收录 → 别冤枉"店里没有"）
+        if _kb_has_model(target):
+            return f"库存查询结果：「{target}」店里在售，实时库存请到店或来电确认。", True
         return f"库存查询结果：店里没有「{target}」这个车型，请直接告诉客户'店里没有这款车'。", True
     return content, False
+
+def _kb_has_model(target):
+    """target 是不是店里在售车型（出现在价目表里）——在售但库存表没收录 → 不该说"店里没有" """
+    nt = _norm(target)
+    for block in kb:
+        m = re.match(r'\s*首驱\s+([^：:]+)', block)
+        if m and (nt in _norm(m.group(1)) or _norm(m.group(1)) in nt):
+            return True
+    return False
+
+# —— 库存确定性保险（v5.7）：模型偶尔"懒得调 CHECK_STOCK 就编库存"，这里替它兜底 ——
+# 背景：DeepSeek 云端实测 Y3 95C MK2 / S300 Ultra 偶发不调工具，凭空编"有现货"（实际 0 台）。
+# 修法：客户问库存但没用上 CHECK_STOCK → 代码直接代调一次，把真实库存塞回上下文再答；还不听就用模板兜底。
+def _is_stock_question(q):
+    """判断客户是不是在问库存/现货/能否提车"""
+    return any(w in q for w in ("库存", "现货", "有货", "还有", "能提", "提车", "现车", "货源", "有没有货", "有现车"))
+
+def _extract_model(question, hits):
+    """从问题/检索结果里找"库存表里的车型"——只有这些有 CHECK_STOCK 真实数据，别拿其他车型去查"""
+    nq = _norm(question)
+    for name in STOCK:
+        if _norm(name) in nq:
+            return name
+    for b in hits:
+        nb = _norm(b)
+        for name in STOCK:
+            if _norm(name) in nb:
+                return name
+    return None
+
+def _stock_answer_from_result(result, model_name):
+    """把 CHECK_STOCK 工具结果转成给客户看的话术（确定性兜底，不再依赖模型自觉）"""
+    if "无现货" in result or "可预订" in result:
+        return f"{model_name} 目前无现货，可预订，到货时间以门店为准。"
+    m = re.search(r'现货\s*(\d+)', result)
+    if m:
+        return f"{model_name} 目前有现货 {m.group(1)} 台，可以提车。"
+    return f"{model_name} 目前缺货，具体到货时间请到店或来电咨询。"
 
 # ============ 4.5 生成（老师傅的"嘴"：本地 or 云端） ============
 def chat_cloud(messages, max_new_tokens=200):
@@ -176,11 +242,15 @@ def ask(question, hits, history=None, max_steps=6):
         "4) 售后维修、保修问题按店内售后资料回答；资料没写具体的（比如保修年限），就说'具体政策按国家三包和品牌质保执行，以购车合同为准，可到店咨询'，不要凭空说'我们不提供'。"
         "5) 客户问整个系列/品类（如'K系列有哪些'、'K1的产品信息'、'都有什么车'）时，把资料里该系列所有车型都列出来（每款一行：型号+电池+续航+核心配置），不要只反问客户想要哪一款；客户明确点名某一款时，才单独详细介绍那一款。"
         "6) 回答用纯文本，禁止用任何 Markdown 符号——不要用 ** 星号加粗（别写'**电池**：'，直接写'电池：'）、不要用 # 标题、不要用 - 项目符号。"
-        "7) 车型名必须严格照价目表原文，禁止自己拼造型号名（价目表只有'K1 95CV MAX'，不能说成'K1 95C MAX'）。客户问的型号价目表里没有，就答'店里没有这个型号，相近的有 XX、XX，您指的是哪款？'，绝不能用相近车型的参数冒名顶替。\n\n"
+        "7) 车型名必须严格照价目表原文，禁止自己拼造型号名（价目表只有'K1 95CV MAX'，不能说成'K1 95C MAX'）。客户问的型号价目表里没有，就答'店里没有这个型号，相近的有 XX、XX，您指的是哪款？'，绝不能用相近车型的参数冒名顶替。"
+        "8) 客户没问库存/现货/提车时，绝对不要主动提库存——不要追加'需要我帮您查一下库存吗'、'要不要帮您查现货'这类话，也不要反问'您想了解哪款车的库存'。只答客户问的，客户没问库存，这个话题就到此为止。"
+        "9) 本店只卖首驱，不卖雅迪/小牛/九号/极核等竞品。客户主动提到竞品品牌或要求对比（'哪个好/怎么选/和XX比/对比'）时，才用资料里的'竞品-'和'对比-'行做客观对比：先一句'本店只卖首驱，但可以帮您对比'，再点出首驱优势（智能配置/动力/性价比），有需要可引用'首驱卖点-'行；客户没提竞品、只问首驱自家车时，绝不主动扯竞品。\n\n"
         "店内价目表资料：\n" + "\n".join(hits) + "\n\n"
+        "资料说明：'首驱...'行是店内价目表（在售车型）；'竞品-...'行是竞品参考（店里不卖，仅对比用）；'首驱卖点-...'行是首驱品牌卖点；'对比-...'行是横向对比话术。只有客户提到竞品或要求对比时才引用后三类，平时只答首驱自家车。\n\n"
         "计算器工具：需要做加减乘除时，必须输出 CALC:<表达式>，例如 CALC:3*4599\n"
-        "库存工具：客户问某车型有没有现货/库存/能不能提车时，必须输出 CHECK_STOCK:<车型名>，例如 CHECK_STOCK:K95C Max\n"
-        "库存工具：客户问到具体车型（如'K95C Max'、'雅迪Q10'）时，必须用 CHECK_STOCK:<车型名> 查；工具返回'店里没有'就说明店里没这款，直接答'店里没有'。只有客户完全没提任何车型（如只问'有现车没'），才回复：'请问您是想了解哪款车的库存？'"
+        "库存工具：客户问某车型有没有现货/库存/还有没有/还能提吗/能不能提车时，必须输出 CHECK_STOCK:<车型名>，例如 CHECK_STOCK:K95C Max\n"
+        "库存工具：客户问到具体车型（如'K95C Max'、'雅迪Q10'）时，必须用 CHECK_STOCK:<车型名> 查；工具返回'店里没有'就说明店里没这款，直接答'店里没有'。"
+        "库存工具：客户明确问库存但完全没提任何车型（如只问'有现车没'）时，才回复：'请问您是想了解哪款车的库存？'"
         "\n\n对话开始前已附上之前的对话记录，客户说的'这台/那台/刚才那款'要结合上文理解，不要反问客户指的哪台。"
     )
     messages = [{"role": "system", "content": system}]
@@ -191,6 +261,7 @@ def ask(question, hits, history=None, max_steps=6):
 
     used_tools = []  # 记下这次调了哪些工具（挖金矿：真实使用痕迹）
     last_tool = None  # 上一个工具结果，防"复读工具"死循环
+    forced_stock = False  # 是否代调过 CHECK_STOCK（确定性库存保险）
     for _ in range(max_steps):
         answer = generate(messages, 200)  # 老师傅的嘴：本地 or 云端（LLM 环境变量切）
         # 看要不要调用工具
@@ -206,6 +277,21 @@ def ask(question, hits, history=None, max_steps=6):
             messages.append({"role": "assistant", "content": answer})
             messages.append({"role": "user", "content": result})
         else:
+            # —— 库存确定性保险：客户问库存/能否提车，但老师傅没调 CHECK_STOCK 就敢答 → 代调一次再答 ——
+            if _is_stock_question(question) and not any("库存查询" in t for t in used_tools):
+                target = _extract_model(question, hits)
+                if target:
+                    stock_result, _ = run_tool(f"CHECK_STOCK:{target}")
+                    used_tools.append(stock_result)
+                    forced_stock = True
+                    messages.append({"role": "assistant", "content": f"CHECK_STOCK:{target}"})
+                    messages.append({"role": "user", "content": stock_result})
+                    continue  # 带真实库存再让老师傅答一轮
+            # 兜底：代调过库存，但老师傅最终还是没按真实库存说 → 模板答案顶上
+            if forced_stock:
+                real = next((t for t in reversed(used_tools) if "库存查询" in t), None)
+                if real and not any(w in answer for w in ("现货", "无现货", "可预订", "没货", "缺货", "没有库存")):
+                    answer = _stock_answer_from_result(real, _extract_model(question, hits))
             return answer, used_tools
     return "（这单算得太复杂，没算完，抱歉）", used_tools
 
@@ -274,6 +360,7 @@ def serve(question, log=True, return_tools=False, history=None):
     hits = retrieve(question)
     answer, used_tools = ask(question, hits, history=history)  # 检索不到也让守则+工具兜底（查库存/算账不依赖知识库）
     answer = _de_markdown(answer)  # 剥掉 Markdown 符号：聊天框是纯文本，不能给客户看 **点点**
+    answer = _strip_proactive_stock(answer, question)  # 客户没问库存，剥掉答尾'要不要查库存'的嘴碎
     if log:
         log_chat(question, answer, hits, used_tools=used_tools, no_hit=not hits)
     return (answer, used_tools) if return_tools else answer
