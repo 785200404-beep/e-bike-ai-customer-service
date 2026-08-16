@@ -1,0 +1,80 @@
+.page {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: #f5f6f7;
+}
+
+.chat {
+  flex: 1;
+  padding: 16rpx;
+  box-sizing: border-box;
+}
+
+.row {
+  display: flex;
+  margin-bottom: 20rpx;
+}
+
+.row.user {
+  justify-content: flex-end;
+}
+
+.bubble {
+  max-width: 72%;
+  padding: 20rpx 24rpx;
+  border-radius: 16rpx;
+  font-size: 28rpx;
+  line-height: 1.6;
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+
+.bubble.bot {
+  background: #ffffff;
+  color: #333333;
+  border-top-left-radius: 4rpx;
+}
+
+.bubble.user {
+  background: #1a73e8;
+  color: #ffffff;
+  border-top-right-radius: 4rpx;
+}
+
+.bubble.typing {
+  color: #999999;
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  padding: 16rpx 20rpx;
+  background: #ffffff;
+  border-top: 1rpx solid #eeeeee;
+}
+
+.input {
+  flex: 1;
+  height: 72rpx;
+  background: #f5f6f7;
+  border-radius: 36rpx;
+  padding: 0 28rpx;
+  font-size: 28rpx;
+}
+
+.send {
+  margin-left: 16rpx;
+  background: #1a73e8;
+  color: #ffffff;
+  font-size: 28rpx;
+  border-radius: 36rpx;
+  padding: 0 36rpx;
+  line-height: 72rpx;
+  height: 72rpx;
+}
+
+.send[disabled] {
+  background: #a3c2f7;
+  color: #ffffff;
+}

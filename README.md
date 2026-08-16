@@ -48,6 +48,24 @@ LLM=deepseek DEEPSEEK_API_KEY=sk-xxx MODEL_NAME=Qwen/Qwen3-0.6B python customer_
 MODEL_NAME=Qwen/Qwen3-1.7B python customer_service.py
 ```
 
+## 跑成小程序（员工体验版）
+
+客服已 API 化，能接进微信小程序——员工/自己先用，不需要企业资质和备案域名：
+
+```bash
+# 1. 起客服 API（默认 http://127.0.0.1:8000，老师傅可切云端）
+LLM=deepseek DEEPSEEK_API_KEY=sk-xxx python server.py
+
+# 2. 微信开发者工具 → 导入项目 → 选 miniprogram/ 目录
+#    → 详情里勾「不校验合法域名」→ 编译，就能在模拟器里对话
+```
+
+```
+小程序对话页 → POST /api/chat → serve() → 回答（含 used_tools 工具痕迹）
+```
+
+API key 只留在你的后端，绝不进小程序前端。
+
 ## 评估结果
 
 | 评估 | 结果 |

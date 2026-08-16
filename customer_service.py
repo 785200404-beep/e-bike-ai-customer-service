@@ -48,12 +48,18 @@ def load_kb(path="data/products.md"):
 kb = load_kb()
 
 # ============ 3. 检索（捞） ============
-def retrieve(question, top_n=5):
+def _norm(s):
+    """检索归一化：去掉所有空格（「Sz 110」=「Sz110」）+ 转小写，客户怎么写都能捞到"""
+    return s.replace(" ", "").replace("　", "").lower()
+
+def retrieve(question, top_n=6):
+    q = _norm(question)
     scored = []
     for block in kb:
+        b = _norm(block)
         score = sum(1 for size in range(2, 7)
-                    for i in range(len(question) - size + 1)
-                    if question[i:i + size] in block)
+                    for i in range(len(q) - size + 1)
+                    if q[i:i + size] in b)
         if score > 0:
             scored.append((score, block))
     scored.sort(reverse=True)
@@ -63,7 +69,7 @@ def retrieve(question, top_n=5):
 # 库存表（模拟实时门店数据；生产换成真库存 API / 数据库查询）
 STOCK = {
     "Sz Lite": 5, "Sz110": 3, "K95C Max": 2,
-    "Y3 95C MK2": 0, "S300 Plus": 1, "S300 Ultra": 0,
+    "Y3 95C MK2": 0, "S300 Ultra": 0,  # S300 Plus 已并入 Ultra（2026-08-16 产品手册同步）
 }
 
 def run_tool(content):
@@ -82,7 +88,10 @@ def run_tool(content):
                      for name, n in STOCK.items()]
             return "库存查询结果（全店）：\n" + "\n".join(lines), True
         # 模糊匹配：模型可能写全名/简称，匹配库存表里的车型名
-        hit = next((name for name in STOCK if name in target or target in name), None)
+        # 归一化后再比：模型按知识库写「首驱 Sz 110」（带空格），库存 key 是「Sz110」→ 去空格才匹配得上
+        nt = _norm(target)
+        hit = next((name for name in STOCK
+                    if _norm(name) in nt or nt in _norm(name)), None)
         if hit:
             n = STOCK[hit]
             if n > 0:
@@ -130,7 +139,9 @@ def generate(messages, max_new_tokens=200):
                             skip_special_tokens=True).strip()
 
 # ============ 5. 客服（检索 + 工具循环 + 回答） ============
-def ask(question, hits, max_steps=6):
+def ask(question, hits, history=None, max_steps=6):
+    """history: 多轮记忆 [(客户问题, 客服回答), ...]，按时间顺序。模型本身没记忆，
+    记忆 = 把前几轮对话塞回上下文（短期记忆）。只存最终的问答对，工具内部往返不进历史。"""
     system = (
         "你是电动车店的客服，老实可靠。规矩："
         "1) 只根据提供的价目表资料回答，不知道就说'店里没有/我不确定'，绝不编造。"
@@ -141,9 +152,13 @@ def ask(question, hits, max_steps=6):
         "计算器工具：需要做加减乘除时，必须输出 CALC:<表达式>，例如 CALC:3*4599\n"
         "库存工具：客户问某车型有没有现货/库存/能不能提车时，必须输出 CHECK_STOCK:<车型名>，例如 CHECK_STOCK:K95C Max\n"
         "库存工具：客户问到具体车型（如'K95C Max'、'雅迪Q10'）时，必须用 CHECK_STOCK:<车型名> 查；工具返回'店里没有'就说明店里没这款，直接答'店里没有'。只有客户完全没提任何车型（如只问'有现车没'），才回复：'请问您是想了解哪款车的库存？'"
+        "\n\n对话开始前已附上之前的对话记录，客户说的'这台/那台/刚才那款'要结合上文理解，不要反问客户指的哪台。"
     )
-    messages = [{"role": "system", "content": system},
-                {"role": "user", "content": question}]
+    messages = [{"role": "system", "content": system}]
+    for h_q, h_a in (history or []):
+        messages.append({"role": "user", "content": h_q})
+        messages.append({"role": "assistant", "content": h_a})
+    messages.append({"role": "user", "content": question})
 
     used_tools = []  # 记下这次调了哪些工具（挖金矿：真实使用痕迹）
     last_tool = None  # 上一个工具结果，防"复读工具"死循环
@@ -216,20 +231,22 @@ if SHUNT:
         return tokenizer.decode(out[0][ids['input_ids'].shape[1]:],
                                 skip_special_tokens=True).strip()
 
-def serve(question, log=True):
+def serve(question, log=True, return_tools=False, history=None):
     """上线入口：分流器看门 → 检索 → 回答 → 挖金矿
-    log=True 才写日志；--demo 演示模式不写，避免污染真实数据"""
+    log=True 才写日志；--demo 演示模式不写，避免污染真实数据
+    return_tools=True 时返回 (answer, used_tools)，给 API 层用（小程序要展示用了啥工具）
+    history: 多轮记忆 [(客户问题, 客服回答), ...]，让客服"记得"前面聊了什么"""
     if SHUNT:
         c = shunt_classify(question)
         if c == "拒客违规":   # 学徒直接挡下坏问题，老师傅不用出手
             if log:
                 log_chat(question, REFUSE_MSG, [], used_tools=["SHUNT_REFUSE"])
-            return REFUSE_MSG
+            return (REFUSE_MSG, ["SHUNT_REFUSE"]) if return_tools else REFUSE_MSG
     hits = retrieve(question)
-    answer, used_tools = ask(question, hits)  # 检索不到也让守则+工具兜底（查库存/算账不依赖知识库）
+    answer, used_tools = ask(question, hits, history=history)  # 检索不到也让守则+工具兜底（查库存/算账不依赖知识库）
     if log:
         log_chat(question, answer, hits, used_tools=used_tools, no_hit=not hits)
-    return answer
+    return (answer, used_tools) if return_tools else answer
 
 if __name__ == "__main__":
     if "--demo" in sys.argv:

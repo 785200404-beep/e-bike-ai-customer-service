@@ -23,7 +23,9 @@ def check(test):
     elif kind == "无货":
         ok = any(w in ans for w in ["无现货", "没有", "没货", "无货", "预订"])
     else:  # 开列：没指定车型 → 应反问是哪款（不许编"其他车型暂无库存"）
-        ok = any(w in ans for w in ["哪款", "哪个车型", "什么车型", "哪款车", "想了解哪款"])
+        ok = any(w in ans for w in ["哪款", "哪一款", "哪个车型", "什么车型", "哪款车",
+                                    "想了解哪款", "想了解哪一", "想了解的车型", "核对",
+                                    "具体是哪", "看中哪"])
     return ok, ans
 
 if __name__ == "__main__":

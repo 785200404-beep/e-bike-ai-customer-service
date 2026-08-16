@@ -1,0 +1,17 @@
+<view class="page">
+  <scroll-view class="chat" scroll-y="true" scroll-with-animation="true"
+               scroll-into-view="msg-{{messages.length - 1}}">
+    <view class="row {{item.role}}" wx:for="{{messages}}" wx:key="index" id="msg-{{index}}">
+      <view class="bubble {{item.role}}">{{item.content}}</view>
+    </view>
+    <view class="row bot" wx:if="{{loading}}">
+      <view class="bubble bot typing">正在想…</view>
+    </view>
+  </scroll-view>
+
+  <view class="bar">
+    <input class="input" value="{{draft}}" bindinput="onInput" bindconfirm="onSend"
+           placeholder="问问价格、库存、续航…" confirm-type="send" />
+    <button class="send" bindtap="onSend" disabled="{{loading}}">发送</button>
+  </view>
+</view>
