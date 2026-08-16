@@ -10,7 +10,7 @@
 """
 import os
 
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 
 import customer_service as cs   # 启动时一次性加载模型（分流器 0.6B + 客服大脑），之后每个请求复用
 
@@ -49,6 +49,12 @@ def chat():
 @app.get("/health")
 def health():
     return jsonify({"ok": True, "llm": cs.LLM, "shunt": cs.SHUNT, "sessions": len(SESSIONS)})
+
+
+@app.get("/")
+def web():
+    """手机网页版聊天页：同事/顾客用手机浏览器打开即可，无需装小程序（配合内网穿透可公网访问）"""
+    return send_from_directory("web", "index.html")
 
 
 if __name__ == "__main__":

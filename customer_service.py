@@ -52,7 +52,33 @@ def _norm(s):
     """检索归一化：去掉所有空格（「Sz 110」=「Sz110」）+ 转小写，客户怎么写都能捞到"""
     return s.replace(" ", "").replace("　", "").lower()
 
-def retrieve(question, top_n=6):
+def _de_markdown(s):
+    """剥掉模型爱加的 Markdown 符号——小程序聊天框是纯文本，不渲染 Markdown，
+    客户看到的 `**电池**` 就是一堆星号点点。回答出口统一过一遍，模型写不写 markdown 都不影响体验。"""
+    s = s.replace("**", "").replace("*", "").replace("`", "")          # 加粗/斜体/行内代码的 * 和 `
+    s = re.sub(r'^#{1,6}\s*', '', s, flags=re.M)                        # 标题 # 去掉
+    s = re.sub(r'(?m)^\s*[-•]\s+', '', s)                               # 行首 - / • 列表符去掉
+    s = re.sub(r'([0-9])\n([A-Za-z]+(?=[，。,.、]))', r'\1\2', s)       # "4600\nW，" 数字断行拼回去
+    return s.strip()
+
+# 系列问法：「K系列 / Sz系列 / 店里有哪些O系」→ 直接把整个系列捞出来
+# （不然 n-gram 打分对单字母系列 K/S/Y/O 会捞空——车型名是「K1 95CV」，查询里的「k系」匹配不上）
+_SERIES_RE = re.compile(r'(?:首驱|店里|你们|我们|在售|有)?\s*([A-Za-z]{1,2})[0-9]*\s*(?:系列|系)')
+
+def _block_series(block):
+    """从知识库一行提取系列前缀：『首驱 K1 95CV MAX：…』→ 'k'；『首驱 Sz5 Ultra』→ 'sz'"""
+    m = re.match(r'\s*首驱\s+([A-Za-z]+)', block)
+    return m.group(1).lower() if m else ""
+
+def retrieve(question, top_n=8):
+    # 1) 系列问法：命中「K系列/Sz系列」→ 把该系列所有车型都捞出来（整系列列全，不许截断）
+    m = _SERIES_RE.search(question)
+    if m:
+        series = m.group(1).lower()
+        blocks = [b for b in kb if _block_series(b) == series]
+        if blocks:
+            return blocks[:12]  # 最多 12 款（当前最大系列 K=10 款），全系列都给
+    # 2) 普通问法：n-gram 打分
     q = _norm(question)
     scored = []
     for block in kb:
@@ -147,7 +173,10 @@ def ask(question, hits, history=None, max_steps=6):
         "1) 只根据提供的价目表资料回答，不知道就说'店里没有/我不确定'，绝不编造。"
         "2) 客户问价格合计、折扣等需要计算的问题，必须用计算器，禁止心算。"
         "3) 任何坑客户、违法、不道德的要求，必须拒绝并劝阻。"
-        "4) 售后维修、保修问题按店内售后资料回答；资料没写具体的（比如保修年限），就说'具体政策按国家三包和品牌质保执行，以购车合同为准，可到店咨询'，不要凭空说'我们不提供'。\n\n"
+        "4) 售后维修、保修问题按店内售后资料回答；资料没写具体的（比如保修年限），就说'具体政策按国家三包和品牌质保执行，以购车合同为准，可到店咨询'，不要凭空说'我们不提供'。"
+        "5) 客户问整个系列/品类（如'K系列有哪些'、'K1的产品信息'、'都有什么车'）时，把资料里该系列所有车型都列出来（每款一行：型号+电池+续航+核心配置），不要只反问客户想要哪一款；客户明确点名某一款时，才单独详细介绍那一款。"
+        "6) 回答用纯文本，禁止用任何 Markdown 符号——不要用 ** 星号加粗（别写'**电池**：'，直接写'电池：'）、不要用 # 标题、不要用 - 项目符号。"
+        "7) 车型名必须严格照价目表原文，禁止自己拼造型号名（价目表只有'K1 95CV MAX'，不能说成'K1 95C MAX'）。客户问的型号价目表里没有，就答'店里没有这个型号，相近的有 XX、XX，您指的是哪款？'，绝不能用相近车型的参数冒名顶替。\n\n"
         "店内价目表资料：\n" + "\n".join(hits) + "\n\n"
         "计算器工具：需要做加减乘除时，必须输出 CALC:<表达式>，例如 CALC:3*4599\n"
         "库存工具：客户问某车型有没有现货/库存/能不能提车时，必须输出 CHECK_STOCK:<车型名>，例如 CHECK_STOCK:K95C Max\n"
@@ -244,6 +273,7 @@ def serve(question, log=True, return_tools=False, history=None):
             return (REFUSE_MSG, ["SHUNT_REFUSE"]) if return_tools else REFUSE_MSG
     hits = retrieve(question)
     answer, used_tools = ask(question, hits, history=history)  # 检索不到也让守则+工具兜底（查库存/算账不依赖知识库）
+    answer = _de_markdown(answer)  # 剥掉 Markdown 符号：聊天框是纯文本，不能给客户看 **点点**
     if log:
         log_chat(question, answer, hits, used_tools=used_tools, no_hit=not hits)
     return (answer, used_tools) if return_tools else answer

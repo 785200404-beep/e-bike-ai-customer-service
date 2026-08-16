@@ -1,7 +1,8 @@
 // 后端地址：
 //   电脑上跑 `python server.py` 后，开发者工具里用 127.0.0.1 即可。
-//   真机预览时，改成电脑的局域网 IP（如 http://192.168.1.6:8000），手机和电脑要连同一个 Wi-Fi。
-const API = 'http://127.0.0.1:8000'
+//   真机预览 / 分享给同事时，改成电脑的局域网 IP（手机和电脑要连同一个 Wi-Fi）。
+//   查 IP：`ipconfig getifaddr en0`（Mac）
+const API = 'http://192.168.1.6:8000'
 const SID_KEY = 'cs_session_id'
 
 // 会话 id：生成一次存在本地，之后每次都带同一个 → 客服能"记得"这一场对话

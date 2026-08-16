@@ -66,6 +66,23 @@ LLM=deepseek DEEPSEEK_API_KEY=sk-xxx python server.py
 
 API key 只留在你的后端，绝不进小程序前端。
 
+## 手机网页版（分享给同事最快）
+
+不想装小程序？`server.py` 自带一个手机网页版聊天页——同事/顾客用手机浏览器打开即可：
+
+```bash
+# 1. 起服务（同上）
+LLM=deepseek DEEPSEEK_API_KEY=sk-xxx python server.py
+
+# 2. 同一 Wi-Fi 的手机，浏览器打开：
+#    http://<电脑局域网IP>:8000        # 查 IP：ipconfig getifaddr en0
+#    公网访问（同事在哪都能开，配合内网穿透）：
+ngrok http 8000                        # 会打印一个 https://xxx.ngrok-free.dev 公网网址
+```
+
+- 网页版和客服 API 同源，无跨域问题；session_id 存在浏览器 localStorage，多轮记忆照常
+- 网页版是无鉴权的员工体验版，公网链接别外发给顾客（后续接权限/登录再做正式版）
+
 ## 评估结果
 
 | 评估 | 结果 |
