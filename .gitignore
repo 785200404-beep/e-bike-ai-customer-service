@@ -1,0 +1,19 @@
+# ---- Python / 系统 ----
+__pycache__/
+*.pyc
+.DS_Store
+
+# ---- 真实客户数据（隐私，绝不进仓库）----
+logs/
+
+# ---- LoRA 补丁（训练产物，不入库；用 make_shunt_data.py + train_ft.py 可复现）----
+ft_shunt/shunt_lora*/
+
+# ---- 密钥 / 环境变量（API key 绝不提交）----
+.env
+*.key
+.env.*
+
+# ---- 本地模型 / 二进制（模型太大，用脚本下载）----
+*.safetensors
+models/
