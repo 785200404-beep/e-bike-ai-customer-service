@@ -236,17 +236,18 @@ def _kb_has_model(target):
     """target 是不是店里在售车型（出现在价目表里）——在售但库存表没收录 → 不该说"店里没有" """
     nt = _norm(target)
     for block in kb:
-        m = re.match(r'\s*首驱\s+([^：:]+)', block)
+        m = re.match(r'\s*首驱\s+(?!卖点)([^：:]+)', block)  # (?!卖点)：跳过"首驱卖点-…"这类非车型行
         if m and (nt in _norm(m.group(1)) or _norm(m.group(1)) in nt):
             return True
     return False
 
 def _kb_models():
     """价目表里所有首驱车型名（'首驱 K1 95CV MAX：…' → 'K1 95CV MAX'）。
-    比 STOCK 全——有些款店里在售但没录库存（如 K1 95CV MAX），外卖/对比/选车都要认它。"""
+    比 STOCK 全——有些款店里在售但没录库存（如 K1 95CV MAX），外卖/对比/选车都要认它。
+    用 (?!卖点) 跳过"首驱卖点-…"这类非车型行，别把"卖点-核心"当车型名。"""
     names = []
     for block in kb:
-        m = re.match(r'\s*首驱\s+([^：:]+)', block)
+        m = re.match(r'\s*首驱\s+(?!卖点)([^：:]+)', block)
         if m:
             n = m.group(1).strip()
             if n and n not in names:
@@ -388,12 +389,14 @@ def _is_delivery_question(q):
     return bool(_DELIVERY_RE.search(q))
 
 def _kb_spec_line(name):
-    """价目表原文：找 '首驱 {name}：…' 那一行（别的行/竞品行不算），找不到返回 ''"""
+    """价目表原文：找 '首驱 {name}：…' 那一行（别的行/竞品行/卖点行不算），找不到返回 ''"""
     nn = _norm(name)
     for block in kb:
         b = block.split("\n")[0].strip()
         if b.startswith("首驱") and "：" in b:
             bname = b.split("：", 1)[0].replace("首驱", "", 1).strip()
+            if bname.startswith("卖点"):  # "首驱卖点-核心：…"不是车型行
+                continue
             if _norm(bname) == nn:
                 return b
     return ""
@@ -503,7 +506,7 @@ def _stock_answer_from_result(result, model_name):
     return f"{model_name} 目前缺货，具体到货时间请到店或来电咨询。"
 
 # ============ 4.5 生成（老师傅的"嘴"：本地 or 云端） ============
-def chat_cloud(messages, max_new_tokens=200):
+def chat_cloud(messages, max_new_tokens=256):
     """云端版：调 OpenAI 兼容接口（DeepSeek / 通义千问）。只给老师傅回答用，分流器不用。"""
     cfg = _CLOUD_CFG[LLM]
     key = os.environ.get(cfg["key_env"], "")
@@ -528,7 +531,7 @@ def chat_cloud(messages, max_new_tokens=200):
         raise ValueError("云端返回空内容")
     return content
 
-def generate(messages, max_new_tokens=200):
+def generate(messages, max_new_tokens=256):
     """老师傅生成回答：LLM=dashscope/deepseek 走云端，否则用本地模型"""
     if LLM in _CLOUD_CFG:
         return chat_cloud(messages, max_new_tokens)
@@ -556,7 +559,8 @@ def ask(question, hits, history=None, max_steps=6):
         "8) 客户没问库存/现货/提车时，绝对不要主动提库存——不要追加'需要我帮您查一下库存吗'、'要不要帮您查现货'这类话，也不要反问'您想了解哪款车的库存'。只答客户问的，客户没问库存，这个话题就到此为止。"
         "9) 本店只卖首驱，不卖雅迪/小牛/九号/极核等竞品。客户主动提到竞品品牌或要求对比（'哪个好/怎么选/和XX比/对比'）时，才用资料里的'竞品-'和'对比-'行做客观对比：先一句'本店只卖首驱，但可以帮您对比'，再点出首驱优势（智能配置/动力/性价比），有需要可引用'首驱卖点-'行；客户没提竞品、只问首驱自家车时，绝不主动扯竞品。"
         "10) 客户问资料里没写的具体参数（大灯类型/亮度、整备重量、车身尺寸、防水等级等），就说'这个参数资料没标注，以实车和购车合同为准，可到店看实车'，绝不许编一个参数名——例如资料没写某车型的大灯，就别说'LED大灯/双透镜大灯'；资料里写了的（电池/续航/极速/功率/电机/制动/屏幕/解锁/安全）照实答。"
-        "11) 客户问完首驱具体车型的价格或库存后，可以在回答末尾自然加一句：'方便留个电话或微信吗？我让店里同事把这款车的实车视频和门店定位发给您。'——这是邀约留资，帮门店抓潜在客户；客户正在对比竞品、或只问售后/门店服务时不要加，别每句都加。\n\n"
+        "11) 客户问完首驱具体车型的价格或库存后，可以在回答末尾自然加一句：'方便留个电话或微信吗？我让店里同事把这款车的实车视频和门店定位发给您。'——这是邀约留资，帮门店抓潜在客户；客户正在对比竞品、或只问售后/门店服务时不要加，别每句都加。"
+        "12) 客户问'首驱有什么卖点/卖点是什么/这车好在哪'时，先答三大核心卖点（VCU整车控制单元、高速数字马达=追觅同源电机技术、追觅生态技术同源），再按需挑1-2条补充（智能/解锁交互/动力），挑重点说别把卖点全罗列一遍；旗舰车型S300的赛道圈速、暴风者的极速是专属成绩，客户没问旗舰/赛道/极速时不要主动拿出来当卖点讲。\n\n"
         "店内价目表资料：\n" + "\n".join(hits) + "\n\n"
         "资料说明：'首驱...'行是店内价目表（在售车型）；'竞品-...'行是竞品参考（店里不卖，仅对比用）；'首驱卖点-...'行是首驱品牌卖点；'对比-...'行是横向对比话术。只有客户提到竞品或要求对比时才引用后三类，平时只答首驱自家车。\n\n"
         "计算器工具：需要做加减乘除时，必须输出 CALC:<表达式>，例如 CALC:3*4599\n"
