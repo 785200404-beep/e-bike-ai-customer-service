@@ -2,10 +2,19 @@
   <scroll-view class="chat" scroll-y="true" scroll-with-animation="true"
                scroll-into-view="msg-{{messages.length - 1}}">
     <view class="row {{item.role}}" wx:for="{{messages}}" wx:key="index" id="msg-{{index}}">
-      <view class="bubble {{item.role}}">{{item.content}}</view>
+      <view class="avatar {{item.role}}">{{item.role == 'user' ? '👤' : '🛵'}}</view>
+      <view class="body">
+        <view class="bubble {{item.role}} {{item.welcome ? 'welcome' : ''}}">{{item.content}}</view>
+        <view class="time {{item.role}}">{{item.time}}</view>
+      </view>
     </view>
     <view class="row bot" wx:if="{{loading}}">
-      <view class="bubble bot typing">正在想…</view>
+      <view class="avatar bot">🛵</view>
+      <view class="body">
+        <view class="bubble bot typing">
+          <view class="dot"></view><view class="dot"></view><view class="dot"></view>
+        </view>
+      </view>
     </view>
   </scroll-view>
 

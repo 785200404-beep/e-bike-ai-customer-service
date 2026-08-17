@@ -15,19 +15,31 @@ function getSessionId() {
   return sid
 }
 
+// 当前时间 HH:MM，显示在每条消息下面
+function nowTime() {
+  const d = new Date()
+  const p = n => (n < 10 ? '0' + n : '' + n)
+  return p(d.getHours()) + ':' + p(d.getMinutes())
+}
+
 Page({
   data: {
     messages: [
-      { role: 'bot', content: '您好，我是首驱电动车店客服。可以问我价格、续航、库存、算账，还能帮您对比雅迪/小牛/九号/极核，比如「首驱和雅迪哪个好？」' }
+      {
+        role: 'bot',
+        welcome: true,
+        content: '📌 首驱电动车 · 南宁一网\n营业时间：每天 9:00-21:00，周末不休\n以旧换新：旧车抵 300-800 元 ｜ 代办上牌 50 元\n可问：价格、续航、库存、算账、售后、竞品对比',
+        time: nowTime()
+      }
     ],
     draft: '',
     loading: false,
     // 快捷对比按钮：点一下直接发问
     suggestions: [
-      { q: '雅迪和首驱哪个好？', label: '和雅迪比' },
-      { q: '九号和首驱怎么选？', label: '和九号比' },
-      { q: '首驱电动车有什么卖点？', label: '首驱卖点' },
-      { q: '首驱S300和九号E300P比哪个强？', label: '旗舰对比' },
+      { q: '雅迪和首驱哪个好？', label: '⚡ 和雅迪比' },
+      { q: '九号和首驱怎么选？', label: '⚡ 和九号比' },
+      { q: '首驱电动车有什么卖点？', label: '💡 首驱卖点' },
+      { q: '首驱S300和九号E300P比哪个强？', label: '🏆 旗舰对比' },
     ],
   },
 
@@ -46,7 +58,7 @@ Page({
     const q = (this.data.draft || '').trim()
     if (!q || this.data.loading) return
 
-    const messages = this.data.messages.concat([{ role: 'user', content: q }])
+    const messages = this.data.messages.concat([{ role: 'user', content: q, time: nowTime() }])
     this.setData({ messages, draft: '', loading: true })
 
     wx.request({
@@ -63,13 +75,16 @@ Page({
           answer += '\n\n（已用工具：' + names + '）'
         }
         if (!answer) answer = '（服务返回异常，请检查后端日志）'
-        this.setData({ messages: this.data.messages.concat([{ role: 'bot', content: answer }]) })
+        this.setData({
+          messages: this.data.messages.concat([{ role: 'bot', content: answer, time: nowTime() }])
+        })
       },
       fail: () => {
         this.setData({
           messages: this.data.messages.concat([{
             role: 'bot',
-            content: '连不上后端。请先跑：python server.py（开发者工具还要勾选「不校验合法域名」）'
+            content: '连不上后端。请先跑：python server.py（开发者工具还要勾选「不校验合法域名」）',
+            time: nowTime()
           }])
         })
       },

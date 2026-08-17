@@ -2,55 +2,150 @@
   height: 100vh;
   display: flex;
   flex-direction: column;
-  background: #f5f6f7;
+  background: #f6f7f9;
 }
 
 .chat {
   flex: 1;
-  padding: 16rpx;
+  padding: 16rpx 24rpx;
   box-sizing: border-box;
 }
 
+/* —— 消息行：头像 + 气泡 + 时间 —— */
 .row {
   display: flex;
-  margin-bottom: 20rpx;
+  margin-bottom: 24rpx;
+  align-items: flex-end;
 }
 
 .row.user {
-  justify-content: flex-end;
+  flex-direction: row-reverse;
+}
+
+.avatar {
+  width: 64rpx;
+  height: 64rpx;
+  border-radius: 50%;
+  flex-shrink: 0;
+  font-size: 34rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.avatar.bot {
+  background: linear-gradient(135deg, #ff8a3d, #ff4d00);
+  box-shadow: 0 2rpx 8rpx rgba(255, 90, 31, 0.3);
+}
+
+.avatar.user {
+  background: #e4e8ed;
+}
+
+.body {
+  max-width: 76%;
+  margin: 0 16rpx;
+  min-width: 0;
 }
 
 .bubble {
-  max-width: 72%;
-  padding: 20rpx 24rpx;
-  border-radius: 16rpx;
+  padding: 18rpx 22rpx;
+  border-radius: 20rpx;
   font-size: 28rpx;
   line-height: 1.6;
   word-break: break-all;
   white-space: pre-wrap;
+  position: relative;
 }
 
 .bubble.bot {
   background: #ffffff;
   color: #333333;
-  border-top-left-radius: 4rpx;
+  border-bottom-left-radius: 6rpx;
+  box-shadow: 0 2rpx 10rpx rgba(0, 0, 0, 0.05);
+}
+
+.bubble.bot::before {
+  content: '';
+  position: absolute;
+  left: -10rpx;
+  bottom: 10rpx;
+  border: 10rpx solid transparent;
+  border-right-color: #ffffff;
+  border-left-width: 0;
 }
 
 .bubble.user {
-  background: #1a73e8;
+  background: linear-gradient(135deg, #ff8a3d, #ff5a1f);
   color: #ffffff;
-  border-top-right-radius: 4rpx;
+  border-bottom-right-radius: 6rpx;
+  box-shadow: 0 2rpx 10rpx rgba(255, 90, 31, 0.25);
 }
 
-.bubble.typing {
-  color: #999999;
+.bubble.user::before {
+  content: '';
+  position: absolute;
+  right: -10rpx;
+  bottom: 10rpx;
+  border: 10rpx solid transparent;
+  border-left-color: #ff5a1f;
+  border-right-width: 0;
 }
 
+/* 欢迎卡片：虚线边框浅色底 */
+.bubble.welcome {
+  background: #fff7f2;
+  border: 2rpx dashed #ffb38a;
+  color: #8a4a26;
+  border-bottom-left-radius: 20rpx;
+}
+
+.time {
+  font-size: 20rpx;
+  color: #b6bcc4;
+  margin-top: 6rpx;
+  padding: 0 6rpx;
+}
+
+.time.user {
+  text-align: right;
+}
+
+/* —— 打字中：三个跳动圆点 —— */
+.typing {
+  display: flex;
+  align-items: center;
+}
+
+.dot {
+  width: 12rpx;
+  height: 12rpx;
+  border-radius: 50%;
+  background: #ff8a3d;
+  margin-right: 8rpx;
+  animation: bounce 1.2s infinite;
+}
+
+.dot:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.dot:nth-child(3) {
+  animation-delay: 0.3s;
+  margin-right: 0;
+}
+
+@keyframes bounce {
+  0%, 100% { transform: translateY(0); opacity: 0.4; }
+  50% { transform: translateY(-6rpx); opacity: 1; }
+}
+
+/* —— 快捷对比按钮 —— */
 .chips {
   flex-shrink: 0;
   display: flex;
   white-space: nowrap;
-  padding: 12rpx 20rpx 4rpx;
+  padding: 14rpx 24rpx 10rpx;
   background: #ffffff;
   border-top: 1rpx solid #f0f0f0;
 }
@@ -58,10 +153,10 @@
 .chip {
   display: inline-block;
   margin-right: 16rpx;
-  padding: 8rpx 24rpx;
-  border-radius: 30rpx;
-  border: 1rpx solid #ffd5c4;
-  background: #fff7f3;
+  padding: 10rpx 26rpx;
+  border-radius: 32rpx;
+  border: 1rpx solid #ffd9c4;
+  background: #fff7f2;
   color: #e04e12;
   font-size: 24rpx;
   line-height: 1.4;
@@ -71,35 +166,39 @@
   background: #ffe4d8;
 }
 
+/* —— 输入条 —— */
 .bar {
   display: flex;
   align-items: center;
-  padding: 16rpx 20rpx;
+  padding: 14rpx 24rpx;
   background: #ffffff;
   border-top: 1rpx solid #eeeeee;
+  padding-bottom: calc(14rpx + env(safe-area-inset-bottom));
 }
 
 .input {
   flex: 1;
   height: 72rpx;
-  background: #f5f6f7;
+  background: #f6f7f9;
   border-radius: 36rpx;
+  border: 1rpx solid #e6e6e6;
   padding: 0 28rpx;
   font-size: 28rpx;
 }
 
 .send {
   margin-left: 16rpx;
-  background: #1a73e8;
+  background: linear-gradient(135deg, #ff8a3d, #ff5a1f);
   color: #ffffff;
   font-size: 28rpx;
   border-radius: 36rpx;
-  padding: 0 36rpx;
+  padding: 0 40rpx;
   line-height: 72rpx;
   height: 72rpx;
+  box-shadow: 0 2rpx 8rpx rgba(255, 90, 31, 0.3);
 }
 
 .send[disabled] {
-  background: #a3c2f7;
-  color: #ffffff;
+  opacity: 0.45;
+  box-shadow: none;
 }

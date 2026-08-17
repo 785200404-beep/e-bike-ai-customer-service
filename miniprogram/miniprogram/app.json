@@ -3,9 +3,10 @@
     "pages/index/index"
   ],
   "window": {
-    "navigationBarTitleText": "首驱客服",
-    "navigationBarBackgroundColor": "#1a73e8",
-    "navigationBarTextStyle": "white"
+    "navigationBarTitleText": "首驱智能客服",
+    "navigationBarBackgroundColor": "#ff5a1f",
+    "navigationBarTextStyle": "white",
+    "backgroundColor": "#f6f7f9"
   },
   "style": "v2",
   "sitemapLocation": "sitemap.json"
