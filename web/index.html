@@ -58,6 +58,14 @@
   .msg .time { font-size: 10px; color: #b6bcc4; margin-top: 4px; padding: 0 2px; }
   .msg.user .time { text-align: right; }
   .msg .tools { font-size: 11px; color: #999; margin-top: 4px; }
+  /* —— 聊天气泡下的地图导航链接 —— */
+  .map-links { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+  .map-link {
+    display: inline-block; border-radius: 14px; padding: 6px 12px; font-size: 12px;
+    text-decoration: none; font-weight: 600;
+  }
+  .map-link.amap { background: #e8f3ff; color: #1a73e8; border: 1px solid #b6d4f0; }
+  .map-link.qq { background: #e6f7ee; color: #0aa858; border: 1px solid #b3e6cd; }
   /* —— 打字中：三个跳动圆点 —— */
   .typing .bubble { display: flex; align-items: center; }
   .typing .dot {
@@ -197,7 +205,7 @@
   function pad(n) { return (n < 10 ? '0' : '') + n; }
   function nowTime() { var d = new Date(); return pad(d.getHours()) + ':' + pad(d.getMinutes()); }
 
-  function addMsg(role, text, tools) {
+  function addMsg(role, text, tools, mapLink) {
     var wrap = document.createElement('div');
     wrap.className = 'msg ' + role;
     var av = document.createElement('div');
@@ -209,6 +217,26 @@
     bubble.className = 'bubble';
     bubble.textContent = text;
     body.appendChild(bubble);
+    // 位置问法的回复：直接在聊天气泡下面放高德/腾讯地图链接，点一下跳导航
+    if (mapLink) {
+      var lk = document.createElement('div');
+      lk.className = 'map-links';
+      var a1 = document.createElement('a');
+      a1.className = 'map-link amap';
+      a1.href = mapLink.amap;
+      a1.target = '_blank';
+      a1.rel = 'noopener';
+      a1.textContent = '🗺️ 高德导航';
+      var a2 = document.createElement('a');
+      a2.className = 'map-link qq';
+      a2.href = mapLink.qq;
+      a2.target = '_blank';
+      a2.rel = 'noopener';
+      a2.textContent = '🗺️ 腾讯地图';
+      lk.appendChild(a1);
+      lk.appendChild(a2);
+      body.appendChild(lk);
+    }
     if (tools && tools.length) {
       var t = document.createElement('div');
       t.className = 'tools';
@@ -262,7 +290,7 @@
     }).then(function (r) { return r.json(); }).then(function (d) {
       var a = d.answer || '';
       if (!a) a = '（服务返回异常，请稍后再试）';
-      addMsg('bot', a, d.used_tools || []);
+      addMsg('bot', a, d.used_tools || [], d.map_link || null);
     }).catch(function () {
       addMsg('bot', '连不上后端。请确认 server.py 正在运行（python server.py）。');
     }).finally(function () {

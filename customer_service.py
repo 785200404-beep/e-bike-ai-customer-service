@@ -8,6 +8,7 @@
     LLM=dashscope DASHSCOPE_API_KEY=sk-xxx python customer_service.py   # 或换通义千问
 """
 import os, re, sys, json, datetime, urllib.request
+from urllib.parse import quote
 os.environ['HF_HUB_OFFLINE'] = '1'  # 强制离线（本地模型用；云端 API 不受影响）
 
 import torch
@@ -335,14 +336,36 @@ def _location_answer(question, lat=None, lng=None):
     if nearest:
         dist_txt = f"（约 {dist:.1f} 公里）" if dist is not None else ""
         return (f"离您最近的是{dist_txt}：{_loc_store_line(nearest)}。"
-                f"您点下方「到店」可以直接导航过来，或留个电话，我让店里同事把实车视频和路线发您。")
+                f"点下面的「导航到店」直接过去，或留个电话，我让店里同事把实车视频和路线发您。")
     # 没定位 → 报总店 + 反问区，别瞎猜客户在哪
     primary = next((s for s in STORES if s.get("primary")), STORES[0] if STORES else None)
     if not primary:
         return "门店信息还没填，老板去 data/stores.json 填一下。"
     n = len(STORES)
     return (f"本店是首驱南宁一网连锁，南宁市区共 {n} 家门店。总店在：{_loc_store_line(primary)}。"
-            f"其他区（江南/青秀/兴宁/西乡塘）也都有店。您靠近哪个区或哪个地标？告诉我，我帮您推最近的一家。")
+            f"点下面的「导航到店」可以直接导航过去。其他区（江南/青秀/兴宁/西乡塘）也都有店，"
+            f"您靠近哪个区或哪个地标？告诉我，我帮您推最近的一家。")
+
+def map_link_for(question, lat=None, lng=None):
+    """客户问位置/就近门店时，返回可直接点跳地图的链接对象（高德 + 腾讯双链接）：
+    {name, address, lat, lng, amap, qq}；非位置问法 / 没门店坐标 → 返回 None。
+    网页版渲染成 <a> 链接，小程序渲染成「导航到店」按钮（wx.openLocation）。
+    有客户定位 → 链接指向最近门店；没定位 → 指向总店（答案里也是这么说的）。"""
+    if not _is_location_question(question):
+        return None
+    nearest, _ = _nearest_store(lat, lng) if (lat is not None and lng is not None) else (None, None)
+    s = nearest or next((x for x in STORES if x.get("primary")), STORES[0] if STORES else None)
+    if not s or not s.get("lat") or not s.get("lng"):
+        return None
+    name = s.get("name", "首驱门店")
+    addr = s.get("address", "")
+    latv, lngv = float(s["lat"]), float(s["lng"])
+    amap = (f"https://uri.amap.com/marker?position={lngv},{latv}"
+            f"&name={quote(name)}&src=yadi_cs")
+    qq = (f"https://apis.map.qq.com/uri/v1/marker"
+          f"?marker=coord:{latv},{lngv};title:{quote(name)};addr:{quote(addr)}"
+          f"&type=0&src=yadi_cs")
+    return {"name": name, "address": addr, "lat": latv, "lng": lngv, "amap": amap, "qq": qq}
 
 def _stock_answer_from_result(result, model_name):
     """把 CHECK_STOCK 工具结果转成给客户看的话术（确定性兜底，不再依赖模型自觉）"""

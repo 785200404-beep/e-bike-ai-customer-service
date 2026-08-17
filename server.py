@@ -80,12 +80,15 @@ def chat():
     except (TypeError, ValueError):
         lat = lng = None
     answer, used_tools = cs.serve(q, return_tools=True, history=history, lat=lat, lng=lng)
+    # 位置/就近问法 → 附带可直接点跳地图的链接（网页版渲染 <a>，小程序渲染导航按钮）
+    map_link = cs.map_link_for(q, lat, lng)
     # 存历史：只存"最终问答对"，工具内部往返（CALC/CHECK_STOCK）不进历史
     SESSIONS[sid] = (SESSIONS.get(sid, []) + [(q, answer)])[-MAX_HISTORY_ROUNDS:]
     if len(SESSIONS) > MAX_SESSIONS:  # 简单防内存泄漏：丢最早写入的会话
         for k in list(SESSIONS)[:len(SESSIONS) - MAX_SESSIONS]:
             SESSIONS.pop(k, None)
-    return jsonify({"ok": True, "answer": answer, "used_tools": used_tools, "session_id": sid})
+    return jsonify({"ok": True, "answer": answer, "used_tools": used_tools,
+                    "map_link": map_link, "session_id": sid})
 
 
 @app.get("/health")

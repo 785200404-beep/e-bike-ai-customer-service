@@ -5,6 +5,10 @@
       <view class="avatar {{item.role}}">{{item.role == 'user' ? '👤' : '🛵'}}</view>
       <view class="body">
         <view class="bubble {{item.role}} {{item.welcome ? 'welcome' : ''}}">{{item.content}}</view>
+        <view wx:if="{{item.mapLink}}" class="map-btn"
+              data-lat="{{item.mapLink.lat}}" data-lng="{{item.mapLink.lng}}"
+              data-name="{{item.mapLink.name}}" data-address="{{item.mapLink.address}}"
+              bindtap="onMapTap">🗺️ 导航到店</view>
         <view class="time {{item.role}}">{{item.time}}</view>
       </view>
     </view>

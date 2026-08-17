@@ -139,8 +139,11 @@ Page({
           answer += '\n\n（已用工具：' + names + '）'
         }
         if (!answer) answer = '（服务返回异常，请检查后端日志）'
+        // 位置问法带 mapLink → 聊天气泡下渲染「导航到店」按钮
         this.setData({
-          messages: this.data.messages.concat([{ role: 'bot', content: answer, time: nowTime() }])
+          messages: this.data.messages.concat([{
+            role: 'bot', content: answer, time: nowTime(), mapLink: d.map_link || null
+          }])
         })
       },
       fail: () => {
@@ -185,6 +188,18 @@ Page({
     })
   },
   hideStore() { this.setData({ showStore: false }) },
+  // 聊天气泡下的「导航到店」按钮：直接打开微信内置地图导航
+  onMapTap(e) {
+    const { lat, lng, name, address } = e.currentTarget.dataset
+    if (!lat || !lng) {
+      wx.showToast({ title: '门店位置还没填', icon: 'none' })
+      return
+    }
+    wx.openLocation({
+      latitude: Number(lat), longitude: Number(lng),
+      name: name || '首驱门店', address: address || '',
+    })
+  },
   callStore(e) {
     const phone = e.currentTarget.dataset.phone
     if (!phone || phone.indexOf('0000000') >= 0) {
