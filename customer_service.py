@@ -355,6 +355,64 @@ def _after_sales_answer():
     return (f"首驱售后总部：{s.get('address')}，{c}电话 {s.get('phone')}。"
             f"点下面的「导航到店」可直达，或先打售后电话 {s.get('phone')}。")
 
+# ============ 4.8 跑外卖/跑单选车确定性护栏（v5.14） ============
+# 背景：顾客问"拿来跑外卖"时，知识库里没有外卖词条，模型拿价目表车型编参数
+# （编出"首驱A7"、把 K95C Max 说成 72V38Ah/150km/快充，实际 72V32Ah/82km 无快充）。
+# 外卖骑手是门店大客群，这类问答必须保真。修法：命中"外卖/跑单/跑腿/送餐"→ 代码直接给选车建议。
+_DELIVERY_RE = re.compile(r'外卖|跑单|跑腿|送餐')
+def _is_delivery_question(q):
+    return bool(_DELIVERY_RE.search(q))
+
+def _kb_spec_line(name):
+    """价目表原文：找 '首驱 {name}：…' 那一行（别的行/竞品行不算），找不到返回 ''"""
+    nn = _norm(name)
+    for block in kb:
+        b = block.split("\n")[0].strip()
+        if b.startswith("首驱") and "：" in b:
+            bname = b.split("：", 1)[0].replace("首驱", "", 1).strip()
+            if _norm(bname) == nn:
+                return b
+    return ""
+
+def _delivery_reco():
+    """没点名车型 → 按日里程分档推荐（车型/参数照价目表原文，绝不编）"""
+    return (
+        "能跑，外卖完全够用——关键是按一天跑的里程选对车（外卖天天高强度骑，别只看纸面续航，要留 20% 余量）：\n"
+        "· 市区短途（一天 60 公里内）：新国标电自免驾照、上绿牌——首驱Sz 110（48V30Ah锂电，续航110km，5199元）\n"
+        "· 跑得远（一天 60-100 公里）：选电摩，但要考驾照、上黄牌——首驱K1 95CV MAX（72V32Ah，等速续航90km，极速73）"
+        "、首驱Y3 95C MK2（72V32Ah，等速续航100km，6999元）\n"
+        "· 要极速、接长途大单：首驱K95C MAX（72V32Ah，全速续航82km，极速70，6699元）\n"
+        "另外：满载爬坡、手机充电都会掉电；天天骑磨损快，售后近很关键——南宁 13 家店都能修。"
+        "以旧换新还能抵 300-800 元。您一天大概跑多少公里？我帮您锁一款，或留个电话让店里把实车视频发您。"
+    )
+
+def _delivery_for_model(m):
+    """客户点名具体车型 → 按这款车实际情况答（照价目表，不编）"""
+    spec = _kb_spec_line(m)
+    if spec and "：" in spec:  # 剥掉 "首驱 Sz 110：" 前缀，只留参数部分
+        spec = spec.split("：", 1)[1].strip()
+    line = f"首驱{m}（{spec}）" if spec else f"首驱{m}"
+    avail = STOCK.get(m, 0)
+    if "新国标" in spec:
+        cls, verdict = "新国标电自，免驾照、上绿牌", "适合市区短途配送（一天 60 公里内）；跑得更远建议看续航更长的款"
+    elif "轻便摩托车" in spec or "电轻摩" in spec:
+        cls, verdict = "电动轻便摩托车，需驾照（F照）、上蓝牌", "短途配送够用，但极速/续航一般，长途不推荐"
+    else:
+        cls, verdict = "电摩，需驾照（E/D照）、上黄牌", "跑得快、续航长，适合全天跑单；注意市区限行路段"
+    stock_txt = f"店里目前现货 {avail} 台" if avail else "店里目前无现货，可预订"
+    return (f"您问的{line}。这是{cls}，{verdict}。{stock_txt}。"
+            f"拿不准的话，告诉我您一天跑多少公里，我帮您对比着选；或留个电话，让店里把实车视频发您。")
+
+def _delivery_answer(question, history=None):
+    """跑外卖选车（确定性）：点名车型→按车型答；没点名→按里程分档推荐"""
+    m = _extract_model(question)
+    if not m and history:
+        for q0, _ in reversed(history):
+            m = _extract_model(q0)
+            if m:
+                break
+    return _delivery_for_model(m) if m else _delivery_reco()
+
 def _location_answer(question, lat=None, lng=None):
     """位置问法的确定性回答（数据来自 data/stores.json，绝不编）"""
     nearest, dist = _nearest_store(lat, lng) if (lat is not None and lng is not None) else (None, None)
@@ -586,6 +644,11 @@ def serve(question, log=True, return_tools=False, history=None, lat=None, lng=No
         if log:
             log_chat(question, answer, [], used_tools=["COMPETITOR_AVAIL"])
         return (answer, ["COMPETITOR_AVAIL"]) if return_tools else answer
+    if _is_delivery_question(question):  # 问"拿来跑外卖/跑单"→ 确定性选车建议（v5.14 护栏）
+        answer = _delivery_answer(question, history=history)
+        if log:
+            log_chat(question, answer, [], used_tools=["DELIVERY_ANSWER"])
+        return (answer, ["DELIVERY_ANSWER"]) if return_tools else answer
     if _is_location_question(question):  # 问"你们在哪/就近门店"→ 确定性推门店（v5.11 护栏）
         if _is_after_sales_question(question):  # 问"售后/维修在哪"→ 报售后总部（v5.13）
             answer = _after_sales_answer()
