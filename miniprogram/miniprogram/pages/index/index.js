@@ -61,7 +61,7 @@ Page({
       {
         role: 'bot',
         welcome: true,
-        content: '📌 首驱电动车 · 南宁一网\n营业时间：每天 9:00-21:00，周末不休\n以旧换新：旧车抵 300-800 元 ｜ 上牌不收费，只收牌照邮递费 15 元\n可问：价格、续航、库存、算账、售后、竞品对比、门店位置',
+        content: '📌 首驱电动车 · 南宁一网\n营业时间：每天 9:00-21:00，周末不休\n以旧换新：旧车抵 300-800 元 ｜ 上牌不收费，只收牌照邮递费 15 元\n可问：价格、续航、库存、算账、售后、跑外卖选车、竞品对比、门店位置',
         time: nowTime()
       }
     ],
@@ -72,6 +72,7 @@ Page({
       { q: '雅迪和首驱哪个好？', label: '⚡ 和雅迪比' },
       { q: '九号和首驱怎么选？', label: '⚡ 和九号比' },
       { q: '首驱电动车有什么卖点？', label: '💡 首驱卖点' },
+      { q: '跑外卖选什么车？', label: '🛵 跑外卖选车' },
       { q: '首驱S300和九号E300P比哪个强？', label: '🏆 旗舰对比' },
       { action: 'store', label: '🏪 到店' },
       { action: 'lead', label: '📱 预约看车' },
@@ -135,8 +136,25 @@ Page({
         let answer = d.answer || ''
         const tools = d.used_tools || []
         if (tools.length) {
-          const names = tools.map(t => (t.includes('计算器') ? '🧮 算账' : '📦 查库存')).join('、')
-          answer += '\n\n（已用工具：' + names + '）'
+          // used_tools 里既有真工具（计算器结果/库存查询结果），也有确定性护栏标记
+          // （SHUNT_REFUSE/COMPETITOR_AVAIL/DELIVERY_ANSWER/AFTER_SALES_ANSWER/LOCATION_ANSWER）。
+          // 一一对应徽章，别把护栏也标成"查库存"；认不出的标记跳过。
+          const MAP = [
+            ['计算器', '🧮 算账'],
+            ['库存查询', '📦 查库存'],
+            ['SHUNT_REFUSE', '🚫 守则拦截'],
+            ['COMPETITOR_AVAIL', '🏁 竞品提醒'],
+            ['DELIVERY_ANSWER', '🛵 外卖选车'],
+            ['AFTER_SALES_ANSWER', '🔧 售后'],
+            ['LOCATION_ANSWER', '📍 就近门店'],
+          ]
+          const names = []
+          tools.forEach(t => {
+            for (const [k, label] of MAP) {
+              if (t.indexOf(k) >= 0) { names.push(label); return }
+            }
+          })
+          if (names.length) answer += '\n\n（已用工具：' + names.join('、') + '）'
         }
         if (!answer) answer = '（服务返回异常，请检查后端日志）'
         // 位置问法带 mapLink → 聊天气泡下渲染「导航到店」按钮

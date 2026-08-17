@@ -241,6 +241,29 @@ def _kb_has_model(target):
             return True
     return False
 
+def _kb_models():
+    """价目表里所有首驱车型名（'首驱 K1 95CV MAX：…' → 'K1 95CV MAX'）。
+    比 STOCK 全——有些款店里在售但没录库存（如 K1 95CV MAX），外卖/对比/选车都要认它。"""
+    names = []
+    for block in kb:
+        m = re.match(r'\s*首驱\s+([^：:]+)', block)
+        if m:
+            n = m.group(1).strip()
+            if n and n not in names:
+                names.append(n)
+    return names
+
+_KB_MODELS = _kb_models()
+
+def _extract_kb_model(question):
+    """从问题里找"价目表里的首驱车型"，比 _extract_model（只认库存表）全。
+    名字长的优先（"K1 95CV MAX"得先于"K1"命中，别拿前缀糊弄）。"""
+    nq = _norm(question)
+    for name in sorted(_KB_MODELS, key=len, reverse=True):
+        if _norm(name) in nq:
+            return name
+    return None
+
 # —— 库存确定性保险（v5.7）：模型偶尔"懒得调 CHECK_STOCK 就编库存"，这里替它兜底 ——
 # 背景：DeepSeek 云端实测 Y3 95C MK2 / S300 Ultra 偶发不调工具，凭空编"有现货"（实际 0 台）。
 # 修法：客户问库存但没用上 CHECK_STOCK → 代码直接代调一次，把真实库存塞回上下文再答；还不听就用模板兜底。
@@ -296,7 +319,8 @@ def _competitor_avail(question):
     只认"问有没有"的，绝不误伤"哪个好/怎么选/比"这类对比题；售后/服务类问法不拦。"""
     if any(w in question for w in ("售后", "维修", "服务", "保修", "以旧换新")):
         return None
-    if not re.search(r'有没有|有卖|有没有卖|在售|有现货|有现车|有货|卖.{0,8}(吗|么|？)', question):
+    # "卖"前面的字不能是"外"——"雅迪能跑外卖吗"里"外卖"的"卖"不是卖车的卖，别误伤
+    if not re.search(r'有没有|有卖|有没有卖|在售|有现货|有现车|有货|(?<!外)卖.{0,8}(吗|么|？)', question):
         return None
     nq = _norm(question)
     for brand in _COMP_BRANDS:
@@ -382,7 +406,8 @@ def _delivery_reco():
         "· 跑得远（一天 60-100 公里）：选电摩，但要考驾照、上黄牌——首驱K1 95CV MAX（72V32Ah，等速续航90km，极速73）"
         "、首驱Y3 95C MK2（72V32Ah，等速续航100km，6999元）\n"
         "· 要极速、接长途大单：首驱K95C MAX（72V32Ah，全速续航82km，极速70，6699元）\n"
-        "另外：满载爬坡、手机充电都会掉电；天天骑磨损快，售后近很关键——南宁 13 家店都能修。"
+        "另外：满载爬坡、手机充电都会掉电；天天骑磨损快，售后近很关键——首驱有专门售后总部"
+        "（中华路133号东湖宾馆负一楼），各门店也能帮忙对接售后。"
         "以旧换新还能抵 300-800 元。您一天大概跑多少公里？我帮您锁一款，或留个电话让店里把实车视频发您。"
     )
 
@@ -392,26 +417,38 @@ def _delivery_for_model(m):
     if spec and "：" in spec:  # 剥掉 "首驱 Sz 110：" 前缀，只留参数部分
         spec = spec.split("：", 1)[1].strip()
     line = f"首驱{m}（{spec}）" if spec else f"首驱{m}"
-    avail = STOCK.get(m, 0)
     if "新国标" in spec:
         cls, verdict = "新国标电自，免驾照、上绿牌", "适合市区短途配送（一天 60 公里内）；跑得更远建议看续航更长的款"
     elif "轻便摩托车" in spec or "电轻摩" in spec:
         cls, verdict = "电动轻便摩托车，需驾照（F照）、上蓝牌", "短途配送够用，但极速/续航一般，长途不推荐"
     else:
         cls, verdict = "电摩，需驾照（E/D照）、上黄牌", "跑得快、续航长，适合全天跑单；注意市区限行路段"
-    stock_txt = f"店里目前现货 {avail} 台" if avail else "店里目前无现货，可预订"
+    # 库存表有这款 → 报真实现货；没录库存（在售但没录入）→ 别说"无现货/可预订"（那是编），只说以门店为准
+    if m in STOCK:
+        avail = STOCK[m]
+        stock_txt = f"店里目前现货 {avail} 台" if avail else "店里目前无现货，可预订"
+    else:
+        stock_txt = "这款店里在售，实时库存请到店或来电确认"
     return (f"您问的{line}。这是{cls}，{verdict}。{stock_txt}。"
             f"拿不准的话，告诉我您一天跑多少公里，我帮您对比着选；或留个电话，让店里把实车视频发您。")
 
 def _delivery_answer(question, history=None):
-    """跑外卖选车（确定性）：点名车型→按车型答；没点名→按里程分档推荐"""
-    m = _extract_model(question)
+    """跑外卖选车（确定性）：点名车型→按车型答；没点名→按里程分档推荐。
+    先认库存表车型（有真实库存），再认价目表车型（在售但没录库存，如 K1 95CV MAX）。"""
+    m = _extract_model(question) or _extract_kb_model(question)
     if not m and history:
         for q0, _ in reversed(history):
-            m = _extract_model(q0)
+            m = _extract_model(q0) or _extract_kb_model(q0)
             if m:
                 break
-    return _delivery_for_model(m) if m else _delivery_reco()
+    if m:
+        return _delivery_for_model(m)
+    # 客户拿竞品车问外卖（"雅迪XX能跑外卖吗"）——本店只卖首驱，别顺着竞品往下编
+    brand = next((b for b in _COMP_BRANDS if b in question), None)
+    if brand:
+        return (f"本店只卖首驱，{brand}的车店里没有。外卖选车其实不分牌子，"
+                f"关键是续航和售后。给您推荐首驱：" + _delivery_reco())
+    return _delivery_reco()
 
 def _location_answer(question, lat=None, lng=None):
     """位置问法的确定性回答（数据来自 data/stores.json，绝不编）"""
