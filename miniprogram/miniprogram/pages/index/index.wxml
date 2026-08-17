@@ -42,7 +42,7 @@
           <view class="store-name">{{item.name}}{{item.dist != null ? ' · 距您 ' + item.dist.toFixed(1) + 'km' : ''}}</view>
           <view class="store-line">📍 {{item.address}}</view>
           <view class="store-line">🕘 {{item.hours || '每天 9:00-21:00，周末不休'}}</view>
-          <view class="store-line">📞 {{item.phone}}</view>
+          <view class="store-line">📞 {{item.phone}}{{item.contact ? '（店长 ' + item.contact + '）' : ''}}</view>
           <view class="sheet-btns">
             <button class="sheet-btn primary" data-phone="{{item.phone}}" bindtap="callStore">📞 拨打电话</button>
             <button class="sheet-btn" data-lat="{{item.lat}}" data-lng="{{item.lng}}"

@@ -145,12 +145,17 @@ def reload_stock():
 _STORES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "stores.json")
 
 def load_stores():
-    """读门店清单；文件缺失/损坏 → 空列表兜底（别让客服崩）。"""
-    global STORES
+    """读门店清单 + 售后总部；文件缺失/损坏 → 空列表兜底（别让客服崩）。
+    stores.json 里 stores 是 13 家销售门店，after_sales 是售后总部（独立条目，不算进"13 家"）。"""
+    global STORES, AFTER_SALES
+    AFTER_SALES = None
     try:
         with open(_STORES_PATH, encoding="utf-8") as f:
             data = json.load(f)
         if isinstance(data, dict):
+            raw_as = data.get("after_sales")
+            if isinstance(raw_as, dict) and raw_as.get("name"):
+                AFTER_SALES = raw_as
             data = data.get("stores", [])
         if isinstance(data, list) and data:
             STORES = [s for s in data if isinstance(s, dict) and s.get("name")]
@@ -159,6 +164,8 @@ def load_stores():
         pass
     STORES = []
     return STORES
+
+AFTER_SALES = None  # 售后总部（首驱售后总部，独立于 13 家门店）
 
 STORES = load_stores()
 
@@ -328,7 +335,25 @@ def _is_location_question(q):
     return bool(_LOC_RE.search(q))
 
 def _loc_store_line(s):
-    return f"【{s.get('name')}】{s.get('address')}，电话 {s.get('phone')}，营业 {s.get('hours', '每天 9:00-21:00')}"
+    """门店一句话简介：店长 + 地址 + 电话 + 营业时间"""
+    c = f"店长 {s['contact']}，" if s.get("contact") else ""
+    return f"【{s.get('name')}】{s.get('address')}，{c}电话 {s.get('phone')}，营业 {s.get('hours') or '每天 9:00-21:00'}"
+
+_AFTER_SALES_RE = re.compile(r'售后|维修|修车|保养')
+def _is_after_sales_question(q):
+    """客户是不是在问售后/维修/保养？命中 → 报售后总部（确定性），别让模型拿"13 家门店"糊弄"""
+    return bool(_AFTER_SALES_RE.search(q))
+
+def _after_sales_store():
+    return AFTER_SALES if isinstance(AFTER_SALES, dict) and AFTER_SALES.get("name") else None
+
+def _after_sales_answer():
+    s = _after_sales_store()
+    if not s:
+        return "售后信息还没填，老板去 data/stores.json 的 after_sales 填一下。"
+    c = f"店长 {s['contact']}，" if s.get("contact") else ""
+    return (f"首驱售后总部：{s.get('address')}，{c}电话 {s.get('phone')}。"
+            f"点下面的「导航到店」可直达，或先打售后电话 {s.get('phone')}。")
 
 def _location_answer(question, lat=None, lng=None):
     """位置问法的确定性回答（数据来自 data/stores.json，绝不编）"""
@@ -346,15 +371,8 @@ def _location_answer(question, lat=None, lng=None):
             f"点下面的「导航到店」可以直接导航过去。其他区（江南/青秀/兴宁/西乡塘）也都有店，"
             f"您靠近哪个区或哪个地标？告诉我，我帮您推最近的一家。")
 
-def map_link_for(question, lat=None, lng=None):
-    """客户问位置/就近门店时，返回可直接点跳地图的链接对象（高德 + 腾讯双链接）：
-    {name, address, lat, lng, amap, qq}；非位置问法 / 没门店坐标 → 返回 None。
-    网页版渲染成 <a> 链接，小程序渲染成「导航到店」按钮（wx.openLocation）。
-    有客户定位 → 链接指向最近门店；没定位 → 指向总店（答案里也是这么说的）。"""
-    if not _is_location_question(question):
-        return None
-    nearest, _ = _nearest_store(lat, lng) if (lat is not None and lng is not None) else (None, None)
-    s = nearest or next((x for x in STORES if x.get("primary")), STORES[0] if STORES else None)
+def _map_link_of(s):
+    """给单个门店/售后条目生成 {name, address, lat, lng, amap, qq} 链接对象；没坐标 → None"""
     if not s or not s.get("lat") or not s.get("lng"):
         return None
     name = s.get("name", "首驱门店")
@@ -366,6 +384,19 @@ def map_link_for(question, lat=None, lng=None):
           f"?marker=coord:{latv},{lngv};title:{quote(name)};addr:{quote(addr)}"
           f"&type=0&src=yadi_cs")
     return {"name": name, "address": addr, "lat": latv, "lng": lngv, "amap": amap, "qq": qq}
+
+def map_link_for(question, lat=None, lng=None):
+    """客户问位置/就近门店/售后在哪时，返回可直接点跳地图的链接对象（高德 + 腾讯双链接）：
+    {name, address, lat, lng, amap, qq}；非位置问法 / 没坐标 → 返回 None。
+    网页版渲染成 <a> 链接，小程序渲染成「导航到店」按钮（wx.openLocation）。
+    问售后/维修 → 指向售后总部；问位置/就近 → 有定位指向最近门店、没定位指向总店（答案里也是这么说的）。"""
+    if not _is_location_question(question):
+        return None
+    if _is_after_sales_question(question):  # 问"售后/维修在哪" → 售后总部（独立于 13 家门店）
+        return _map_link_of(_after_sales_store())
+    nearest, _ = _nearest_store(lat, lng) if (lat is not None and lng is not None) else (None, None)
+    s = nearest or next((x for x in STORES if x.get("primary")), STORES[0] if STORES else None)
+    return _map_link_of(s)
 
 def _stock_answer_from_result(result, model_name):
     """把 CHECK_STOCK 工具结果转成给客户看的话术（确定性兜底，不再依赖模型自觉）"""
@@ -556,10 +587,15 @@ def serve(question, log=True, return_tools=False, history=None, lat=None, lng=No
             log_chat(question, answer, [], used_tools=["COMPETITOR_AVAIL"])
         return (answer, ["COMPETITOR_AVAIL"]) if return_tools else answer
     if _is_location_question(question):  # 问"你们在哪/就近门店"→ 确定性推门店（v5.11 护栏）
-        answer = _location_answer(question, lat, lng)
+        if _is_after_sales_question(question):  # 问"售后/维修在哪"→ 报售后总部（v5.13）
+            answer = _after_sales_answer()
+            used = "AFTER_SALES_ANSWER"
+        else:
+            answer = _location_answer(question, lat, lng)
+            used = "LOCATION_ANSWER"
         if log:
-            log_chat(question, answer, [], used_tools=["LOCATION_ANSWER"])
-        return (answer, ["LOCATION_ANSWER"]) if return_tools else answer
+            log_chat(question, answer, [], used_tools=[used])
+        return (answer, [used]) if return_tools else answer
     hits = retrieve(question)
     answer, used_tools = ask(question, hits, history=history)  # 检索不到也让守则+工具兜底（查库存/算账不依赖知识库）
     answer = _de_markdown(answer)  # 剥掉 Markdown 符号：聊天框是纯文本，不能给客户看 **点点**

@@ -348,7 +348,7 @@
       (s._dist != null ? ' · 距您 ' + s._dist.toFixed(1) + 'km' : '') + '</div>' +
       '<div class="st-line">📍 ' + (s.address || '') + '</div>' +
       '<div class="st-line">🕘 ' + (s.hours || '每天 9:00-21:00，周末不休') + '</div>' +
-      '<div class="st-line">📞 ' + (s.phone || '') + '</div>' +
+      '<div class="st-line">📞 ' + (s.phone || '') + (s.contact ? '（店长 ' + s.contact + '）' : '') + '</div>' +
       '<div class="sheet-btns">' +
       '<button class="sheet-btn primary" data-phone="' + (s.phone || '') + '">📞 拨打电话</button>' +
       '<button class="sheet-btn" data-lat="' + s.lat + '" data-lng="' + s.lng + '" data-name="' + (s.name || '首驱门店') + '">🗺️ 导航</button>' +

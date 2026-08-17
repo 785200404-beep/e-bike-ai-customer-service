@@ -120,16 +120,17 @@ def lead():
 # ============ 门店信息（小程序/网页版取来展示，不含 admin_key） ============
 @app.get("/api/store")
 def store():
-    """返回：store=总店（老板看板可编辑）、stores=南宁一网 13 家全量（data/stores.json）。
+    """返回：store=总店（老板看板可编辑）、stores=南宁一网 13 家全量、after_sales=售后总部（data/stores.json）。
     小程序"到店"弹层按 stores 列表展示；admin_key 一律不外泄。"""
     s = dict(_get_store())
     s.pop("admin_key", None)
     # 全量门店清单（13 家）——只给前端展示用的字段
     branches = []
     for st in cs.STORES:
-        item = {k: st.get(k) for k in ("name", "area", "address", "phone", "hours", "lat", "lng", "primary")}
+        item = {k: st.get(k) for k in ("name", "area", "address", "phone", "hours", "lat", "lng", "primary", "contact")}
         branches.append(item)
-    return jsonify({"ok": True, "store": s, "stores": branches})
+    asr = dict(cs.AFTER_SALES) if isinstance(cs.AFTER_SALES, dict) else None
+    return jsonify({"ok": True, "store": s, "stores": branches, "after_sales": asr})
 
 
 @app.post("/api/store")
