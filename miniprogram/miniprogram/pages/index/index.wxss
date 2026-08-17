@@ -202,3 +202,88 @@
   opacity: 0.45;
   box-shadow: none;
 }
+
+/* —— 弹层：到店信息 / 预约留资 —— */
+.overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 40rpx;
+}
+
+.sheet {
+  background: #ffffff;
+  border-radius: 32rpx;
+  width: 100%;
+  max-width: 640rpx;
+  padding: 36rpx 32rpx;
+  box-sizing: border-box;
+}
+
+.sheet-title {
+  font-size: 32rpx;
+  font-weight: 600;
+  color: #333;
+  margin-bottom: 22rpx;
+}
+
+.sheet-line {
+  font-size: 28rpx;
+  color: #555;
+  margin-bottom: 14rpx;
+  line-height: 1.5;
+  word-break: break-all;
+}
+
+.sheet-input {
+  width: 100%;
+  border: 1rpx solid #dddddd;
+  border-radius: 20rpx;
+  padding: 20rpx 24rpx;
+  font-size: 28rpx;
+  margin-bottom: 18rpx;
+  box-sizing: border-box;
+  background: #f6f7f9;
+}
+
+.sheet-btns {
+  display: flex;
+  gap: 16rpx;
+  margin-top: 24rpx;
+}
+
+.sheet-btn {
+  flex: 1;
+  border: 1rpx solid #ffd9c4;
+  border-radius: 20rpx;
+  padding: 20rpx 0;
+  font-size: 28rpx;
+  text-align: center;
+  background: #ffffff;
+  color: #e04e12;
+  line-height: 1.4;
+}
+
+.sheet-btn.primary {
+  background: linear-gradient(135deg, #ff8a3d, #ff5a1f);
+  color: #ffffff;
+  border: none;
+  box-shadow: 0 2rpx 8rpx rgba(255, 90, 31, 0.3);
+}
+
+.sheet-btn.primary[disabled] {
+  opacity: 0.45;
+  box-shadow: none;
+}
+
+.sheet-close {
+  text-align: center;
+  color: #999;
+  font-size: 26rpx;
+  margin-top: 22rpx;
+  padding: 8rpx 0;
+}

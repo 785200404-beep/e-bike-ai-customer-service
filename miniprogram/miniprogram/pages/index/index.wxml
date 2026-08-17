@@ -20,12 +20,39 @@
 
   <scroll-view class="chips" scroll-x="true" show-scrollbar="false">
     <view class="chip" wx:for="{{suggestions}}" wx:key="label"
-          data-q="{{item.q}}" bindtap="onSuggest">{{item.label}}</view>
+          data-q="{{item.q}}" data-action="{{item.action}}" bindtap="onSuggest">{{item.label}}</view>
   </scroll-view>
 
   <view class="bar">
     <input class="input" value="{{draft}}" bindinput="onInput" bindconfirm="onSend"
            placeholder="问问价格、库存、续航、竞品对比…" confirm-type="send" />
     <button class="send" bindtap="onSend" disabled="{{loading}}">发送</button>
+  </view>
+
+  <!-- 门店信息弹层 -->
+  <view class="overlay" wx:if="{{showStore}}" bindtap="hideStore">
+    <view class="sheet" catchtap="noop">
+      <view class="sheet-title">🏪 {{store.name}}</view>
+      <view class="sheet-line">📍 {{store.address}}</view>
+      <view class="sheet-line">🕘 {{store.hours}}</view>
+      <view class="sheet-line">📞 {{store.phone}}</view>
+      <view class="sheet-btns">
+        <button class="sheet-btn primary" bindtap="callStore">📞 拨打电话</button>
+        <button class="sheet-btn" bindtap="navigateStore">🗺️ 导航到店</button>
+      </view>
+      <view class="sheet-close" bindtap="hideStore">关闭</view>
+    </view>
+  </view>
+
+  <!-- 留资弹层 -->
+  <view class="overlay" wx:if="{{showLead}}" bindtap="hideLead">
+    <view class="sheet" catchtap="noop">
+      <view class="sheet-title">📱 预约看车 / 留个电话</view>
+      <input class="sheet-input" type="number" maxlength="11" placeholder="手机号（我们只用于联系您）"
+             value="{{leadPhone}}" bindinput="onLeadPhone" />
+      <input class="sheet-input" placeholder="想看的车型（可选）" value="{{leadModel}}" bindinput="onLeadModel" />
+      <button class="sheet-btn primary" bindtap="submitLead" disabled="{{leadSaving}}">提交，门店会联系您</button>
+      <view class="sheet-close" bindtap="hideLead">取消</view>
+    </view>
   </view>
 </view>

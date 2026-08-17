@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>首驱客服 · 老板看板</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif;
+    background: #f3f4f6; color: #333; padding-bottom: 40px;
+  }
+  header {
+    background: linear-gradient(135deg, #ff8a3d 0%, #ff5a1f 55%, #e8460a 100%);
+    color: #fff; padding: 18px 16px; box-shadow: 0 3px 12px rgba(255,90,31,.25);
+  }
+  header h1 { font-size: 18px; }
+  header p { font-size: 11px; opacity: .9; margin-top: 3px; }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 16px 14px; }
+  /* 概览卡 */
+  .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 18px; }
+  .card { background: #fff; border-radius: 12px; padding: 14px 12px; text-align: center;
+    box-shadow: 0 1px 4px rgba(0,0,0,.05); }
+  .card .num { font-size: 26px; font-weight: 700; color: #ff5a1f; }
+  .card .lab { font-size: 12px; color: #888; margin-top: 4px; }
+  /* 区块 */
+  .sec { background: #fff; border-radius: 14px; padding: 16px 14px; margin-bottom: 14px;
+    box-shadow: 0 1px 4px rgba(0,0,0,.05); }
+  .sec h2 { font-size: 15px; margin-bottom: 10px; color: #444; }
+  .sec h2 .hint { font-size: 11px; color: #aaa; font-weight: 400; margin-left: 6px; }
+  /* 表格 */
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid #f0f0f0; }
+  th { color: #888; font-weight: 500; font-size: 12px; }
+  .pending { color: #d4380d; font-weight: 600; }
+  .tag { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 9px; background: #fff1ec; color: #e04e12; }
+  .tag.wait { background: #fff7e6; color: #d48806; }
+  .empty { color: #aaa; font-size: 13px; padding: 8px 2px; }
+  /* 热门车型条 */
+  .hot { display: flex; flex-wrap: wrap; gap: 8px; }
+  .hot .chip { background: #fff4ee; border: 1px solid #ffd9c4; color: #e04e12; border-radius: 16px;
+    padding: 5px 12px; font-size: 13px; }
+  /* 库存编辑 */
+  .stock-row { display: flex; align-items: center; justify-content: space-between; padding: 9px 2px;
+    border-bottom: 1px solid #f0f0f0; }
+  .stock-row:last-child { border-bottom: none; }
+  .stock-row .name { font-size: 14px; }
+  .stock-row input { width: 72px; text-align: center; border: 1px solid #ddd; border-radius: 10px;
+    padding: 6px; font-size: 15px; }
+  .btn { border: none; border-radius: 12px; padding: 9px 16px; font-size: 14px; cursor: pointer;
+    background: linear-gradient(135deg, #ff8a3d, #ff5a1f); color: #fff; box-shadow: 0 2px 6px rgba(255,90,31,.3); }
+  .btn.gray { background: #fff; color: #888; border: 1px solid #ddd; box-shadow: none; }
+  .btn.save { width: 100%; margin-top: 12px; }
+  /* 表单（门店信息 / 登录） */
+  .field { margin-bottom: 10px; }
+  .field label { display: block; font-size: 12px; color: #888; margin-bottom: 4px; }
+  .field input { width: 100%; border: 1px solid #ddd; border-radius: 10px; padding: 9px 11px; font-size: 14px; }
+  .field input:focus { outline: none; border-color: #ff5a1f; }
+  /* 登录遮罩 */
+  #login { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: none;
+    align-items: center; justify-content: center; z-index: 10; }
+  #login .box { background: #fff; border-radius: 16px; padding: 22px 20px; width: 82%; max-width: 320px; }
+  #login h2 { font-size: 16px; margin-bottom: 12px; text-align: center; }
+  .toast { position: fixed; top: 14px; left: 50%; transform: translateX(-50%); background: #333;
+    color: #fff; font-size: 13px; padding: 8px 16px; border-radius: 20px; opacity: 0; pointer-events: none;
+    transition: opacity .25s; z-index: 20; }
+  .toast.show { opacity: .92; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🛵 首驱客服 · 老板看板</h1>
+  <p>留资 · 热门车型 · 待跟进 · 库存管理</p>
+</header>
+
+<div class="wrap">
+  <div class="cards" id="cards"></div>
+
+  <div class="sec">
+    <h2>📞 最近留资<span class="hint">超过 3 天未联系 = 待跟进</span></h2>
+    <div id="leads"></div>
+  </div>
+
+  <div class="sec">
+    <h2>🔥 热门车型<span class="hint">按客户问答里提到次数粗统计</span></h2>
+    <div class="hot" id="hot"></div>
+  </div>
+
+  <div class="sec">
+    <h2>📦 库存管理<span class="hint">改完点保存，客服立刻生效</span></h2>
+    <div id="stock"></div>
+    <button class="btn save" onclick="saveStock()">保存库存</button>
+  </div>
+
+  <div class="sec">
+    <h2>🏪 门店信息<span class="hint">显示在小程序/网页版的门店卡里</span></h2>
+    <div class="field"><label>门店名</label><input id="f_name"></div>
+    <div class="field"><label>地址</label><input id="f_address"></div>
+    <div class="field"><label>电话</label><input id="f_phone"></div>
+    <div class="field"><label>营业时间</label><input id="f_hours"></div>
+    <button class="btn save" onclick="saveStore()">保存门店信息</button>
+  </div>
+
+  <p style="text-align:center; margin-top:16px;">
+    <button class="btn gray" onclick="logout()">退出看板</button>
+  </p>
+</div>
+
+<div id="login">
+  <div class="box">
+    <h2>🔒 老板看板</h2>
+    <div class="field"><label>管理密码（data/store.json 里的 admin_key）</label>
+      <input id="key_input" type="password" placeholder="输入密码">
+    </div>
+    <button class="btn" style="width:100%;" onclick="login()">进入</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function () {
+  var KEY = 'admin_key';
+  function getKey() {
+    var u = new URLSearchParams(location.search).get('key');
+    if (u) { localStorage.setItem(KEY, u); return u; }
+    return localStorage.getItem(KEY) || '';
+  }
+  var key = getKey();
+
+  function showLogin() { document.getElementById('login').style.display = 'flex'; }
+  function toast(msg) {
+    var t = document.getElementById('toast');
+    t.textContent = msg; t.classList.add('show');
+    setTimeout(function () { t.classList.remove('show'); }, 1800);
+  }
+
+  window.login = function () {
+    key = document.getElementById('key_input').value.trim();
+    if (!key) return;
+    localStorage.setItem(KEY, key);
+    load();
+  };
+  window.logout = function () { localStorage.removeItem(KEY); key = ''; showLogin(); };
+
+  function load() {
+    fetch('/api/admin?key=' + encodeURIComponent(key)).then(function (r) { return r.json(); }).then(function (d) {
+      if (!d.ok) { showLogin(); return; }
+      render(d);
+    }).catch(function () { showLogin(); });
+  }
+
+  function render(d) {
+    document.getElementById('cards').innerHTML =
+      '<div class="card"><div class="num">' + d.today_leads + '</div><div class="lab">今日留资</div></div>' +
+      '<div class="card"><div class="num">' + d.total_leads + '</div><div class="lab">累计留资</div></div>' +
+      '<div class="card"><div class="num">' + d.today_chats + '</div><div class="lab">今日对话</div></div>';
+
+    var leads = d.leads || [];
+    if (!leads.length) {
+      document.getElementById('leads').innerHTML = '<div class="empty">还没有留资。等顾客在客服里点了「预约看车」就会出现在这里。</div>';
+    } else {
+      var rows = leads.map(function (l) {
+        var wait = l.age_days >= 3;
+        return '<tr>' +
+          '<td>' + (l.time || '').slice(5, 16).replace('T', ' ') + '</td>' +
+          '<td>' + l.phone + '</td>' +
+          '<td>' + (l.model || '-') + '</td>' +
+          '<td>' + (wait ? '<span class="tag wait">待跟进' + l.age_days + '天</span>' : '<span class="tag">新</span>') + '</td>' +
+          '</tr>';
+      }).join('');
+      document.getElementById('leads').innerHTML =
+        '<table><tr><th>时间</th><th>电话</th><th>车型</th><th>状态</th></tr>' + rows + '</table>';
+    }
+
+    var hot = d.hot_models || [];
+    document.getElementById('hot').innerHTML = hot.length
+      ? hot.map(function (h) { return '<span class="chip">' + h[0] + ' ×' + h[1] + '</span>'; }).join('')
+      : '<div class="empty">暂无数据，跑一阵再来看。</div>';
+
+    var stock = d.stock || {};
+    document.getElementById('stock').innerHTML = Object.keys(stock).map(function (name) {
+      return '<div class="stock-row"><span class="name">' + name + '</span>' +
+        '<input type="number" min="0" data-name="' + name + '" value="' + stock[name] + '"></div>';
+    }).join('');
+
+    // 门店信息表单回填
+    fetch('/api/store').then(function (r) { return r.json(); }).then(function (d2) {
+      var s = d2.store || {};
+      document.getElementById('f_name').value = s.name || '';
+      document.getElementById('f_address').value = s.address || '';
+      document.getElementById('f_phone').value = s.phone || '';
+      document.getElementById('f_hours').value = s.hours || '';
+    });
+  }
+
+  window.saveStock = function () {
+    var inputs = document.querySelectorAll('#stock input[data-name]');
+    var stock = {};
+    inputs.forEach(function (inp) {
+      stock[inp.getAttribute('data-name')] = parseInt(inp.value || '0', 10) || 0;
+    });
+    fetch('/api/stock?key=' + encodeURIComponent(key), {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stock: stock })
+    }).then(function (r) { return r.json(); }).then(function (d) {
+      if (d.ok) { toast('库存已保存，客服已生效 ✅'); } else { toast('保存失败：' + (d.error || '')); }
+    }).catch(function () { toast('连不上后端'); });
+  };
+
+  window.saveStore = function () {
+    var body = {
+      name: document.getElementById('f_name').value.trim(),
+      address: document.getElementById('f_address').value.trim(),
+      phone: document.getElementById('f_phone').value.trim(),
+      hours: document.getElementById('f_hours').value.trim()
+    };
+    fetch('/api/store?key=' + encodeURIComponent(key), {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    }).then(function (r) { return r.json(); }).then(function (d) {
+      if (d.ok) { toast('门店信息已保存 ✅'); } else { toast('保存失败：' + (d.error || '')); }
+    }).catch(function () { toast('连不上后端'); });
+  };
+
+  if (key) { load(); } else { showLogin(); }
+})();
+</script>
+</body>
+</html>

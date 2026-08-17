@@ -100,6 +100,31 @@
     font-size: 13px; color: #6b4a34; line-height: 1.7;
   }
   .welcome-card b { color: #e04e12; }
+  /* —— 门店 / 留资弹层 —— */
+  .overlay {
+    position: fixed; inset: 0; background: rgba(0, 0, 0, .45); display: none;
+    align-items: center; justify-content: center; z-index: 10; padding: 20px;
+  }
+  .overlay .sheet {
+    background: #fff; border-radius: 16px; width: 100%; max-width: 340px; padding: 20px 18px;
+  }
+  .sheet-title { font-size: 16px; font-weight: 600; margin-bottom: 12px; }
+  .sheet-line { font-size: 14px; color: #555; margin-bottom: 8px; line-height: 1.5; }
+  .sheet-input {
+    width: 100%; border: 1px solid #ddd; border-radius: 12px; padding: 11px 13px;
+    font-size: 15px; margin-bottom: 10px;
+  }
+  .sheet-input:focus { outline: none; border-color: #ff5a1f; }
+  .sheet-btns { display: flex; gap: 8px; margin-top: 14px; }
+  .sheet-btn {
+    flex: 1; border: 1px solid #ffd9c4; border-radius: 12px; padding: 11px; font-size: 14px; cursor: pointer;
+    background: #fff; color: #e04e12;
+  }
+  .sheet-btn.primary {
+    background: linear-gradient(135deg, #ff8a3d, #ff5a1f); color: #fff; border: none;
+    box-shadow: 0 2px 6px rgba(255, 90, 31, .3);
+  }
+  .sheet-close { text-align: center; color: #999; font-size: 13px; margin-top: 12px; cursor: pointer; }
 </style>
 </head>
 <body>
@@ -118,11 +143,38 @@
   <button data-q="九号和首驱怎么选？">⚡ 和九号比</button>
   <button data-q="首驱电动车有什么卖点？">💡 首驱卖点</button>
   <button data-q="首驱S300和九号E300P比哪个强？">🏆 旗舰对比</button>
+  <button data-action="store">🏪 到店</button>
+  <button data-action="lead">📱 预约看车</button>
 </div>
 <footer>
   <input id="input" type="text" placeholder="比如：首驱 Sz110 多少钱？" autocomplete="off">
   <button id="send" disabled>发送</button>
 </footer>
+
+<!-- 门店信息弹层 -->
+<div class="overlay" id="storeModal">
+  <div class="sheet">
+    <div class="sheet-title" id="st_name">🏪 首驱电动车 · 南宁一网门店</div>
+    <div class="sheet-line" id="st_addr"></div>
+    <div class="sheet-line" id="st_hours"></div>
+    <div class="sheet-line" id="st_phone"></div>
+    <div class="sheet-btns">
+      <button class="sheet-btn primary" id="st_call">📞 拨打电话</button>
+      <button class="sheet-btn" id="st_nav">🗺️ 导航到店</button>
+    </div>
+    <div class="sheet-close" id="st_close">关闭</div>
+  </div>
+</div>
+<!-- 留资弹层 -->
+<div class="overlay" id="leadModal">
+  <div class="sheet">
+    <div class="sheet-title">📱 预约看车 / 留个电话</div>
+    <input class="sheet-input" id="lead_phone" type="tel" maxlength="11" placeholder="手机号（我们只用于联系您）">
+    <input class="sheet-input" id="lead_model" placeholder="想看的车型（可选）">
+    <button class="sheet-btn primary" id="lead_submit">提交，门店会联系您</button>
+    <div class="sheet-close" id="lead_close">取消</div>
+  </div>
+</div>
 
 <script>
 (function () {
@@ -197,6 +249,8 @@
   }
 
   function ask(q) {
+    var dm = detectModel(q);
+    if (dm) lastModel = dm;
     busy = true; send.disabled = true;
     addMsg('user', q);
     botTyping(true);
@@ -228,14 +282,84 @@
     send.disabled = busy || !input.value.trim();
   });
 
-  // 快捷对比按钮：点一下直接发问（对比竞品 / 首驱卖点）
+  // 快捷按钮：对比 / 到店 / 预约看车
   var chips = document.querySelector('.chips');
   chips.addEventListener('click', function (e) {
     var btn = e.target.closest('button');
     if (!btn || busy) return;
+    var action = btn.getAttribute('data-action');
+    if (action === 'store') { openStore(); return; }
+    if (action === 'lead') { openLead(); return; }
     var q = btn.getAttribute('data-q');
     if (q) { input.value = ''; ask(q); }
   });
+
+  // —— 门店信息 + 留资（P0：邀约到店 / 抓潜在客户）——
+  var store = null;
+  var lastModel = '';
+  function fetchStore(cb) {
+    if (store) { cb && cb(); return; }
+    fetch('/api/store').then(function (r) { return r.json(); }).then(function (d) {
+      store = d.store || {};
+      cb && cb();
+    }).catch(function () { store = {}; cb && cb(); });
+  }
+  function openStore() {
+    fetchStore(function () {
+      document.getElementById('st_name').textContent = '🏪 ' + (store.name || '首驱门店');
+      document.getElementById('st_addr').textContent = '📍 ' + (store.address || '');
+      document.getElementById('st_hours').textContent = '🕘 ' + (store.hours || '');
+      document.getElementById('st_phone').textContent = '📞 ' + (store.phone || '');
+      document.getElementById('storeModal').style.display = 'flex';
+    });
+  }
+  function closeStore() { document.getElementById('storeModal').style.display = 'none'; }
+  function openLead() {
+    document.getElementById('lead_model').value = lastModel;
+    document.getElementById('leadModal').style.display = 'flex';
+    setTimeout(function () { document.getElementById('lead_phone').focus(); }, 50);
+  }
+  function closeLead() { document.getElementById('leadModal').style.display = 'none'; }
+  function submitLead() {
+    var phone = document.getElementById('lead_phone').value.trim();
+    if (!/^1\d{10}$/.test(phone)) { alert('手机号要 11 位、1 开头哦'); return; }
+    var btn = document.getElementById('lead_submit');
+    btn.disabled = true; btn.textContent = '提交中…';
+    fetch('/api/lead', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone: phone, model: document.getElementById('lead_model').value.trim() })
+    }).then(function (r) { return r.json(); }).then(function (d) {
+      if (d.ok) {
+        closeLead();
+        alert('已登记 ✅ 门店会尽快联系您，也可以直接到店看车！');
+      } else { alert(d.error || '提交失败'); }
+    }).catch(function () { alert('连不上后端'); })
+      .finally(function () { btn.disabled = false; btn.textContent = '提交，门店会联系您'; });
+  }
+  // 弹层关闭 / 拨号 / 导航
+  document.getElementById('st_close').addEventListener('click', closeStore);
+  document.getElementById('lead_close').addEventListener('click', closeLead);
+  document.getElementById('st_call').addEventListener('click', function () {
+    if (store.phone) location.href = 'tel:' + store.phone;
+  });
+  document.getElementById('st_nav').addEventListener('click', function () {
+    var url = 'https://uri.amap.com/marker?position=' + store.lng + ',' + store.lat +
+      '&name=' + encodeURIComponent(store.name || '首驱门店');
+    window.open(url, '_blank');
+  });
+  document.getElementById('lead_submit').addEventListener('click', submitLead);
+  // 点遮罩空白处关闭
+  ['storeModal', 'leadModal'].forEach(function (id) {
+    document.getElementById(id).addEventListener('click', function (e) {
+      if (e.target === this) this.style.display = 'none';
+    });
+  });
+  // 问价时记下车型，留资表单自动预填"想看的车型"
+  function detectModel(q) {
+    var m = q.match(/首驱\s*([A-Za-z0-9][A-Za-z0-9\- ]*)/);
+    if (m && m[1].trim()) return '首驱' + m[1].trim();
+    return '';
+  }
 
   input.focus();
 })();
