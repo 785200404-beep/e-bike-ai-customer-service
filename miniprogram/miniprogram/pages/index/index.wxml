@@ -9,6 +9,14 @@
               data-lat="{{item.mapLink.lat}}" data-lng="{{item.mapLink.lng}}"
               data-name="{{item.mapLink.name}}" data-address="{{item.mapLink.address}}"
               bindtap="onMapTap">🗺️ 导航到店</view>
+        <!-- 每条客服回答下的 👍/👎 满意度反馈：点过就换成"已收到反馈" -->
+        <view wx:if="{{item.role == 'bot' && !item.welcome && item.question}}" class="fb-row">
+          <block wx:if="{{!item.rated}}">
+            <view class="fb-btn" data-index="{{index}}" data-rating="1" bindtap="onRate">👍 满意</view>
+            <view class="fb-btn" data-index="{{index}}" data-rating="0" bindtap="onRate">👎 不满意</view>
+          </block>
+          <view wx:else class="fb-done">已收到反馈，谢谢！</view>
+        </view>
         <view class="time {{item.role}}">{{item.time}}</view>
       </view>
     </view>

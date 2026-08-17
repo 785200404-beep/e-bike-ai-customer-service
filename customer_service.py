@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""电动车店智能客服 —— v5.20（分流看门 + RAG 查产品 + 计算器 + 查库存[指定/反问] + 售后兜底 + 南宁在售车型护栏 + 挖金矿日志）
+"""电动车店智能客服 —— v5.21（分流看门 + RAG 查产品 + 计算器 + 查库存[指定/反问] + 售后兜底 + 南宁在售车型护栏 + 转人工护栏 + 挖金矿日志）
 老师傅可换云端（LLM=dashscope 时走通义千问 API），分流器学徒始终留本地 0.6B——第8课模型路由：简单给学徒、难给老师傅。
 用法：
     python customer_service.py --demo   # 跑几个预设问题看效果（不写日志）
@@ -399,6 +399,23 @@ def _lineup_answer(m):
     return (f"首驱{m} 南宁门店没有在售——这款是品牌全系或外地才有的车。\n"
             f"南宁一网门店目前在售的车型有 12 款：\n{_lineup_list_text()}\n"
             f"您想看哪款？我帮您查价格、续航和库存。")
+
+# ============ 4.77 转人工护栏（v5.21） ============
+# 背景：客户想要真人（"转人工/人工客服/找真人"），纯 AI 答话再对也不如人有人情味，
+# 而且复杂诉求（售后纠纷/砍价/过户/分期谈价）得真人接。修法：命中 → 代码直接亮总店电话 + 邀留资，
+# 后台（server.py）据此记录转人工事件（数据源：data/handoffs.json，老板看板能看到客户想找人的原话）。
+_HANDOFF_RE = re.compile(r'转人工|人工客服|人工服务|找人工|联系人工|真人客服|人工接|人工回答')
+
+def _is_handoff_question(q):
+    return bool(_HANDOFF_RE.search(q))
+
+def _handoff_answer():
+    s = next((x for x in STORES if x.get("primary")), STORES[0] if STORES else None)
+    phone = s.get("phone") if s else ""
+    if not phone:
+        return "已为您转人工，门店会尽快回复您。您也可以点「预约看车」留个电话，门店马上回拨。"
+    return (f"已为您转人工。总店电话 {phone}（营业时间 9:00-21:00，周末不休）。"
+            f"您也可以点「预约看车」留个电话，门店马上回拨给您。")
 
 # ============ 4.75 门店位置/就近门店确定性护栏（v5.11，v5.19 加区/路/店名结构化） ============
 # 背景：客户问"你们在哪里 / 就近门店 / 附近有没有店"时，n-gram 检索捞不到门店地址行
@@ -829,6 +846,11 @@ def serve(question, log=True, return_tools=False, history=None, lat=None, lng=No
         if log:
             log_chat(question, answer, [], used_tools=["LINEUP_GUARD"])
         return (answer, ["LINEUP_GUARD"]) if return_tools else answer
+    if _is_handoff_question(question):  # 客户要转人工 → 亮电话 + 邀留资（v5.21 护栏）
+        answer = _handoff_answer()
+        if log:
+            log_chat(question, answer, [], used_tools=["HANDOFF"])
+        return (answer, ["HANDOFF"]) if return_tools else answer
     if _is_location_question(question):  # 问"你们在哪/就近门店"→ 确定性推门店（v5.11 护栏）
         if _is_after_sales_question(question):  # 问"售后/维修在哪"→ 报售后总部（v5.13）
             answer = _after_sales_answer()

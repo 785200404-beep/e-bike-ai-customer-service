@@ -85,6 +85,14 @@
     border-radius: 18px; padding: 7px 14px; font-size: 13px; cursor: pointer;
   }
   .chips button:active { background: #ffe4d8; }
+  /* —— 每条客服回答下的 👍/👎 满意度反馈 —— */
+  .feedback { display: flex; gap: 8px; margin-top: 8px; }
+  .fb-btn {
+    border: 1px solid #ffd9c4; background: #fff7f2; color: #e04e12;
+    border-radius: 14px; padding: 4px 12px; font-size: 12px; cursor: pointer;
+  }
+  .fb-btn:active { background: #ffe4d8; }
+  .fb-done { font-size: 12px; color: #999; }
   /* —— 输入条 —— */
   footer {
     flex-shrink: 0; display: flex; gap: 8px; padding: 10px 12px; background: #fff;
@@ -161,6 +169,7 @@
   <button data-q="首驱S300和九号E300P比哪个强？">🏆 旗舰对比</button>
   <button data-action="store">🏪 到店</button>
   <button data-action="lead">📱 预约看车</button>
+  <button data-q="转人工">🙋 转人工</button>
 </div>
 <footer>
   <input id="input" type="text" placeholder="比如：首驱 Sz110 多少钱？" autocomplete="off">
@@ -206,7 +215,7 @@
   function pad(n) { return (n < 10 ? '0' : '') + n; }
   function nowTime() { var d = new Date(); return pad(d.getHours()) + ':' + pad(d.getMinutes()); }
 
-  function addMsg(role, text, tools, mapLink) {
+  function addMsg(role, text, tools, mapLink, q) {
     var wrap = document.createElement('div');
     wrap.className = 'msg ' + role;
     var av = document.createElement('div');
@@ -249,7 +258,8 @@
         ['COMPETITOR_AVAIL', '🏁 竞品提醒'],
         ['DELIVERY_ANSWER', '🛵 外卖选车'],
         ['AFTER_SALES_ANSWER', '🔧 售后'],
-        ['LOCATION_ANSWER', '📍 就近门店']
+        ['LOCATION_ANSWER', '📍 就近门店'],
+        ['HANDOFF', '🙋 转人工']
       ];
       var names = [];
       tools.forEach(function (x) {
@@ -264,6 +274,19 @@
         body.appendChild(t);
       }
     }
+    // 每条客服回答下挂 👍/👎 满意度反馈（点一次就替换成"已收到反馈"，防重复提交）
+    if (role === 'bot' && q) {
+      var fb = document.createElement('div');
+      fb.className = 'feedback';
+      fb.innerHTML = '<button class="fb-btn" data-r="1">👍 满意</button>' +
+                     '<button class="fb-btn" data-r="0">👎 不满意</button>';
+      fb.addEventListener('click', function (e) {
+        var b = e.target.closest('.fb-btn');
+        if (!b) return;
+        submitRating(Number(b.getAttribute('data-r')), q, fb);
+      });
+      body.appendChild(fb);
+    }
     var time = document.createElement('div');
     time.className = 'time';
     time.textContent = nowTime();
@@ -272,6 +295,16 @@
     wrap.appendChild(body);
     chat.appendChild(wrap);
     chat.scrollTop = chat.scrollHeight;
+  }
+
+  function submitRating(rating, q, el) {
+    fetch('/api/rating', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: getSessionId(), rating: rating, question: q })
+    }).then(function (r) { return r.json(); }).then(function (d) {
+      if (d.ok) el.innerHTML = '<span class="fb-done">已收到反馈，谢谢！</span>';
+    }).catch(function () {});
   }
 
   function botTyping(on) {
@@ -309,7 +342,7 @@
     }).then(function (r) { return r.json(); }).then(function (d) {
       var a = d.answer || '';
       if (!a) a = '（服务返回异常，请稍后再试）';
-      addMsg('bot', a, d.used_tools || [], d.map_link || null);
+      addMsg('bot', a, d.used_tools || [], d.map_link || null, q);
     }).catch(function () {
       addMsg('bot', '连不上后端。请确认 server.py 正在运行（python server.py）。');
     }).finally(function () {

@@ -340,3 +340,30 @@
 .map-btn:active {
   opacity: 0.85;
 }
+
+/* —— 每条客服回答下的 👍/👎 满意度反馈 —— */
+.fb-row {
+  display: flex;
+  margin-top: 14rpx;
+}
+
+.fb-btn {
+  margin-right: 16rpx;
+  padding: 8rpx 22rpx;
+  border-radius: 24rpx;
+  border: 1rpx solid #ffd9c4;
+  background: #fff7f2;
+  color: #e04e12;
+  font-size: 24rpx;
+  line-height: 1.4;
+}
+
+.fb-btn:active {
+  background: #ffe4d8;
+}
+
+.fb-done {
+  font-size: 22rpx;
+  color: #999;
+  padding: 8rpx 4rpx;
+}

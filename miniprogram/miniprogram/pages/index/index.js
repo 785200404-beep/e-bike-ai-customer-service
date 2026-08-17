@@ -76,6 +76,7 @@ Page({
       { q: '首驱S300和九号E300P比哪个强？', label: '🏆 旗舰对比' },
       { action: 'store', label: '🏪 到店' },
       { action: 'lead', label: '📱 预约看车' },
+      { q: '转人工', label: '🙋 转人工' },
     ],
     // 门店列表（南宁一网 13 家）+ 留资
     showStore: false,
@@ -147,6 +148,7 @@ Page({
             ['DELIVERY_ANSWER', '🛵 外卖选车'],
             ['AFTER_SALES_ANSWER', '🔧 售后'],
             ['LOCATION_ANSWER', '📍 就近门店'],
+            ['HANDOFF', '🙋 转人工'],
           ]
           const names = []
           tools.forEach(t => {
@@ -160,7 +162,8 @@ Page({
         // 位置问法带 mapLink → 聊天气泡下渲染「导航到店」按钮
         this.setData({
           messages: this.data.messages.concat([{
-            role: 'bot', content: answer, time: nowTime(), mapLink: d.map_link || null
+            role: 'bot', content: answer, time: nowTime(), mapLink: d.map_link || null,
+            question: q, rated: false
           }])
         })
       },
@@ -216,6 +219,24 @@ Page({
     wx.openLocation({
       latitude: Number(lat), longitude: Number(lng),
       name: name || '首驱门店', address: address || '',
+    })
+  },
+  // 满意度反馈：点 👍/👎 → 落库 ratings.json，成功后该条消息标 rated 防重复提交
+  onRate(e) {
+    const { index, rating } = e.currentTarget.dataset
+    const idx = Number(index)
+    const msg = this.data.messages[idx]
+    if (!msg || !msg.question) return
+    wx.request({
+      url: API + '/api/rating',
+      method: 'POST',
+      header: { 'Content-Type': 'application/json' },
+      data: { session_id: getSessionId(), rating: Number(rating), question: msg.question },
+      success: (res) => {
+        if (res.data && res.data.ok) {
+          this.setData({ ['messages[' + idx + '].rated']: true })
+        }
+      },
     })
   },
   callStore(e) {

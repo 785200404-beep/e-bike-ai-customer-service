@@ -16,10 +16,12 @@ import customer_service as cs   # 启动时一次性加载模型（分流器 0.6
 
 app = Flask(__name__)
 
-# ============ 数据文件（留资 / 门店 / 库存） ============
+# ============ 数据文件（留资 / 门店 / 库存 / 转人工 / 满意度） ============
 _DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 LEADS_PATH = os.path.join(_DATA_DIR, "leads.json")
 STORE_PATH = os.path.join(_DATA_DIR, "store.json")
+HANDOFFS_PATH = os.path.join(_DATA_DIR, "handoffs.json")
+RATINGS_PATH = os.path.join(_DATA_DIR, "ratings.json")
 
 def _read_json(path, default):
     try:
@@ -80,6 +82,17 @@ def chat():
     except (TypeError, ValueError):
         lat = lng = None
     answer, used_tools = cs.serve(q, return_tools=True, history=history, lat=lat, lng=lng)
+    # 客户要转人工 → 落库转人工事件（老板看板看得到谁想找真人、原话是什么）
+    if "HANDOFF" in used_tools:
+        handoffs = _read_json(HANDOFFS_PATH, [])
+        if not isinstance(handoffs, list):
+            handoffs = []
+        handoffs.append({
+            "time": datetime.datetime.now().isoformat(timespec="seconds"),
+            "session_id": sid,
+            "question": q,
+        })
+        _write_json(HANDOFFS_PATH, handoffs)
     # 位置/就近问法 → 附带可直接点跳地图的链接（网页版渲染 <a>，小程序渲染导航按钮）
     map_link = cs.map_link_for(q, lat, lng)
     # 存历史：只存"最终问答对"，工具内部往返（CALC/CHECK_STOCK）不进历史
@@ -99,7 +112,8 @@ def health():
 # ============ 留资：客户留电话/微信 → 存 data/leads.json ============
 @app.post("/api/lead")
 def lead():
-    """POST {phone, model?, note?} → 存留资表（P0 留资：把问价的潜在客户抓下来）"""
+    """POST {phone, model?, note?} → 存留资表（P0 留资：把问价的潜在客户抓下来）
+    新线索默认 status=未联系（老板看板按真实跟进状态跟踪；老记录无 status 读时默认"未联系"）"""
     data = request.get_json(force=True, silent=True) or {}
     phone = (data.get("phone") or "").strip()
     if not re.fullmatch(r"1\d{10}", phone):
@@ -112,7 +126,56 @@ def lead():
         "phone": phone,
         "model": (data.get("model") or "").strip(),
         "note": (data.get("note") or "").strip(),
+        "status": "未联系",
     })
+    _write_json(LEADS_PATH, leads)
+    return jsonify({"ok": True})
+
+
+# ============ 满意度：客户对回答 👍/👎 → 存 data/ratings.json ============
+@app.post("/api/rating")
+def rating():
+    """POST {session_id, rating, question?} → 存满意度表（老板看板看好评/差评统计）
+    rating: 1=👍 满意 / 0=👎 不满意（网页/小程序每条客服回答下点反馈）"""
+    data = request.get_json(force=True, silent=True) or {}
+    rv = data.get("rating")
+    if rv not in (0, 1):
+        return jsonify({"ok": False, "error": "rating 要是 0（不满意）或 1（满意）"}), 400
+    sid = (data.get("session_id") or "").strip() or "default"
+    ratings = _read_json(RATINGS_PATH, [])
+    if not isinstance(ratings, list):
+        ratings = []
+    ratings.append({
+        "time": datetime.datetime.now().isoformat(timespec="seconds"),
+        "session_id": sid,
+        "rating": int(rv),
+        "question": (data.get("question") or "").strip(),
+    })
+    _write_json(RATINGS_PATH, ratings)
+    return jsonify({"ok": True})
+
+
+# ============ 线索状态：老板跟进留资 → 未联系/已联系/成交 ============
+@app.post("/api/lead/status")
+def lead_status():
+    """POST {index, status}（带 ?key=）→ 更新某条留资的跟进状态；status ∈ 未联系/已联系/成交"""
+    if not _admin_ok():
+        return jsonify({"ok": False, "error": "key 不对"}), 403
+    data = request.get_json(force=True, silent=True) or {}
+    status = data.get("status")
+    if status not in ("未联系", "已联系", "成交"):
+        return jsonify({"ok": False, "error": "status 要是 未联系/已联系/成交"}), 400
+    leads = _read_json(LEADS_PATH, [])
+    if not isinstance(leads, list):
+        leads = []
+    try:
+        idx = int(data.get("index"))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "index 要是数字"}), 400
+    if not (0 <= idx < len(leads)):
+        return jsonify({"ok": False, "error": "index 越界"}), 400
+    leads[idx]["status"] = status
+    leads[idx]["updated"] = datetime.datetime.now().isoformat(timespec="seconds")
     _write_json(LEADS_PATH, leads)
     return jsonify({"ok": True})
 
@@ -205,7 +268,8 @@ def admin():
 
     today = now.strftime("%Y-%m-%d")
     today_leads = sum(1 for l in leads if str(l.get("time", "")).startswith(today))
-    leads_sorted = sorted(leads, key=lambda x: str(x.get("time", "")), reverse=True)
+    # 带原文件下标（老板看板"改状态"要用真实 index 写回 leads.json，排序后下标会变）
+    leads_sorted = sorted(enumerate(leads), key=lambda x: str(x[1].get("time", "")), reverse=True)
 
     # 今日对话数 + 热门车型（从问答日志粗统计）
     today_chats = 0
@@ -229,16 +293,44 @@ def admin():
         pass
     hot = sorted(mentions.items(), key=lambda kv: -kv[1])[:8]
 
+    # 线索状态统计（真实 status：老记录没写 → 默认"未联系"，不重写历史文件）
+    status_counts = {"未联系": 0, "已联系": 0, "成交": 0}
+    for l in leads:
+        st = l.get("status") or "未联系"
+        status_counts[st] = status_counts.get(st, 0) + 1
+
+    # 满意度统计（data/ratings.json：总/好评/差评 + 今日好/差）
+    ratings = _read_json(RATINGS_PATH, [])
+    if not isinstance(ratings, list):
+        ratings = []
+    good = sum(1 for r in ratings if r.get("rating") == 1)
+    bad = sum(1 for r in ratings if r.get("rating") == 0)
+    today_good = sum(1 for r in ratings
+                     if r.get("rating") == 1 and str(r.get("time", "")).startswith(today))
+    today_bad = sum(1 for r in ratings
+                    if r.get("rating") == 0 and str(r.get("time", "")).startswith(today))
+
+    # 最近转人工（data/handoffs.json：按时间倒序，最近 20 条）
+    handoffs = _read_json(HANDOFFS_PATH, [])
+    if not isinstance(handoffs, list):
+        handoffs = []
+    handoffs = sorted(handoffs, key=lambda h: str(h.get("time", "")), reverse=True)[:20]
+
     return jsonify({
         "ok": True,
         "today_leads": today_leads,
         "total_leads": len(leads),
         "today_chats": today_chats,
-        "leads": [{"time": l.get("time"), "phone": l.get("phone"), "model": l.get("model"),
-                   "note": l.get("note"), "age_days": age_days(str(l.get("time", "")))}
-                  for l in leads_sorted[:20]],
+        "leads": [{"idx": i, "time": l.get("time"), "phone": l.get("phone"), "model": l.get("model"),
+                   "note": l.get("note"), "status": l.get("status") or "未联系",
+                   "age_days": age_days(str(l.get("time", "")))}
+                  for i, l in leads_sorted[:20]],
         "hot_models": hot,
         "stock": cs.STOCK,
+        "status_counts": status_counts,
+        "ratings": {"total": len(ratings), "good": good, "bad": bad,
+                    "today_good": today_good, "today_bad": today_bad},
+        "handoffs": handoffs,
     })
 
 

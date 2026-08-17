@@ -7,6 +7,8 @@ __pycache__/
 logs/
 data/leads.json
 data/store.json
+data/handoffs.json
+data/ratings.json
 
 # ---- LoRA 补丁（训练产物，不入库；用 make_shunt_data.py + train_ft.py 可复现）----
 ft_shunt/shunt_lora*/

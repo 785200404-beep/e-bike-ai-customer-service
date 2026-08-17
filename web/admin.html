@@ -18,7 +18,7 @@
   header p { font-size: 11px; opacity: .9; margin-top: 3px; }
   .wrap { max-width: 720px; margin: 0 auto; padding: 16px 14px; }
   /* 概览卡 */
-  .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 18px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 10px; margin-bottom: 18px; }
   .card { background: #fff; border-radius: 12px; padding: 14px 12px; text-align: center;
     box-shadow: 0 1px 4px rgba(0,0,0,.05); }
   .card .num { font-size: 26px; font-weight: 700; color: #ff5a1f; }
@@ -35,6 +35,18 @@
   .pending { color: #d4380d; font-weight: 600; }
   .tag { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 9px; background: #fff1ec; color: #e04e12; }
   .tag.wait { background: #fff7e6; color: #d48806; }
+  .tag.new { background: #f0f0f0; color: #999; }
+  .tag.done { background: #e8f7ee; color: #0aa858; }
+  /* 线索状态切换小按钮 */
+  .st-btns { display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap; }
+  .st-btn { border: 1px solid #e0e0e0; background: #fff; color: #666; border-radius: 8px;
+    padding: 2px 8px; font-size: 11px; cursor: pointer; }
+  .st-btn.on { background: #ff5a1f; color: #fff; border-color: #ff5a1f; }
+  /* 最近转人工列表 */
+  .ho-row { padding: 8px 2px; border-bottom: 1px solid #f0f0f0; font-size: 13px; }
+  .ho-row:last-child { border-bottom: none; }
+  .ho-time { color: #999; font-size: 12px; margin-right: 8px; }
+  .ho-q { color: #333; }
   .empty { color: #aaa; font-size: 13px; padding: 8px 2px; }
   /* 热门车型条 */
   .hot { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -70,15 +82,20 @@
 <body>
 <header>
   <h1>🛵 首驱客服 · 老板看板</h1>
-  <p>留资 · 热门车型 · 待跟进 · 库存管理</p>
+  <p>留资 · 状态跟进 · 满意度 · 转人工 · 库存管理</p>
 </header>
 
 <div class="wrap">
   <div class="cards" id="cards"></div>
 
   <div class="sec">
-    <h2>📞 最近留资<span class="hint">超过 3 天未联系 = 待跟进</span></h2>
+    <h2>📞 最近留资<span class="hint">每行点按钮改跟进状态：未联系 / 已联系 / 成交</span></h2>
     <div id="leads"></div>
+  </div>
+
+  <div class="sec">
+    <h2>🙋 最近转人工<span class="hint">客户想找真人时的原话，按时间倒序最近 20 条</span></h2>
+    <div id="handoffs"></div>
   </div>
 
   <div class="sec">
@@ -151,27 +168,42 @@
   }
 
   function render(d) {
+    var r = d.ratings || {};
     document.getElementById('cards').innerHTML =
       '<div class="card"><div class="num">' + d.today_leads + '</div><div class="lab">今日留资</div></div>' +
       '<div class="card"><div class="num">' + d.total_leads + '</div><div class="lab">累计留资</div></div>' +
-      '<div class="card"><div class="num">' + d.today_chats + '</div><div class="lab">今日对话</div></div>';
+      '<div class="card"><div class="num">' + d.today_chats + '</div><div class="lab">今日对话</div></div>' +
+      '<div class="card"><div class="num">' + (r.good || 0) + ' · ' + (r.bad || 0) + '</div><div class="lab">好评 · 差评</div></div>';
 
     var leads = d.leads || [];
     if (!leads.length) {
       document.getElementById('leads').innerHTML = '<div class="empty">还没有留资。等顾客在客服里点了「预约看车」就会出现在这里。</div>';
     } else {
       var rows = leads.map(function (l) {
-        var wait = l.age_days >= 3;
+        var st = l.status || '未联系';
+        var cls = st === '成交' ? 'done' : (st === '已联系' ? 'wait' : 'new');
+        function btn(s) {
+          return '<button class="st-btn' + (st === s ? ' on' : '') + '" onclick="setLeadStatus(' + l.idx + ', \'' + s + '\')">' + s + '</button>';
+        }
         return '<tr>' +
           '<td>' + (l.time || '').slice(5, 16).replace('T', ' ') + '</td>' +
           '<td>' + l.phone + '</td>' +
           '<td>' + (l.model || '-') + '</td>' +
-          '<td>' + (wait ? '<span class="tag wait">待跟进' + l.age_days + '天</span>' : '<span class="tag">新</span>') + '</td>' +
+          '<td><span class="tag ' + cls + '">' + st + '</span>' +
+          '<div class="st-btns">' + btn('未联系') + btn('已联系') + btn('成交') + '</div></td>' +
           '</tr>';
       }).join('');
       document.getElementById('leads').innerHTML =
         '<table><tr><th>时间</th><th>电话</th><th>车型</th><th>状态</th></tr>' + rows + '</table>';
     }
+
+    var handoffs = d.handoffs || [];
+    document.getElementById('handoffs').innerHTML = handoffs.length
+      ? handoffs.map(function (h) {
+          return '<div class="ho-row"><span class="ho-time">' + (h.time || '').slice(5, 16).replace('T', ' ') + '</span>' +
+            '<span class="ho-q">' + (h.question || '') + '</span></div>';
+        }).join('')
+      : '<div class="empty">还没有客户要求转人工。</div>';
 
     var hot = d.hot_models || [];
     document.getElementById('hot').innerHTML = hot.length
@@ -220,6 +252,16 @@
       body: JSON.stringify(body)
     }).then(function (r) { return r.json(); }).then(function (d) {
       if (d.ok) { toast('门店信息已保存 ✅'); } else { toast('保存失败：' + (d.error || '')); }
+    }).catch(function () { toast('连不上后端'); });
+  };
+
+  window.setLeadStatus = function (i, s) {
+    fetch('/api/lead/status?key=' + encodeURIComponent(key), {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ index: i, status: s })
+    }).then(function (r) { return r.json(); }).then(function (d) {
+      if (d.ok) { toast('已标记为「' + s + '」✅'); load(); }
+      else { toast('更新失败：' + (d.error || '')); }
     }).catch(function () { toast('连不上后端'); });
   };
 
