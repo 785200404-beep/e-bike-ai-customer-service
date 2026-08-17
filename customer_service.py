@@ -138,6 +138,55 @@ def reload_stock():
     """/api/stock 改完库存后热更新内存（不用重启服务）"""
     return load_stock()
 
+# ============ 3.5 门店网络（data/stores.json，南宁一网 13 家） ============
+# 客户问"你们在哪里/就近门店/附近有没有店"时，代码直接算最近门店推送（确定性），不劳烦模型猜。
+# 数据存在 data/stores.json（老板可自己改地址/电话/坐标），改了重启服务或 /api/store 重新拉取。
+_STORES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "stores.json")
+
+def load_stores():
+    """读门店清单；文件缺失/损坏 → 空列表兜底（别让客服崩）。"""
+    global STORES
+    try:
+        with open(_STORES_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            data = data.get("stores", [])
+        if isinstance(data, list) and data:
+            STORES = [s for s in data if isinstance(s, dict) and s.get("name")]
+            return STORES
+    except Exception:
+        pass
+    STORES = []
+    return STORES
+
+STORES = load_stores()
+
+def _haversine_km(lat1, lng1, lat2, lng2):
+    """球面距离（公里）——用来找"离客户最近的门店" """
+    import math
+    R = 6371.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp = math.radians(lat2 - lat1)
+    dl = math.radians(lng2 - lng1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return R * 2 * math.asin(math.sqrt(a))
+
+def _nearest_store(lat, lng):
+    """给定客户坐标 → 返回 (最近门店 dict, 距离公里)；没有门店/坐标非法 → (None, None)"""
+    try:
+        lat, lng = float(lat), float(lng)
+    except (TypeError, ValueError):
+        return None, None
+    best, best_d = None, None
+    for s in STORES:
+        try:
+            d = _haversine_km(lat, lng, float(s["lat"]), float(s["lng"]))
+        except (TypeError, ValueError, KeyError):
+            continue
+        if best_d is None or d < best_d:
+            best, best_d = s, d
+    return best, best_d
+
 def run_tool(content):
     """检测模型输出里的工具调用，执行并返回真实结果（CALC 计算器 / CHECK_STOCK 查库存）"""
     m = re.search(r'CALC:([0-9+\-*/.() ]+)', content)
@@ -255,6 +304,45 @@ def _competitor_avail(question):
         if _norm(name) in nq:
             return name
     return None
+
+# ============ 4.75 门店位置/就近门店确定性护栏（v5.11） ============
+# 背景：客户问"你们在哪里 / 就近门店 / 附近有没有店"时，n-gram 检索捞不到门店地址行
+# （"你们在哪里"和地址文本没有任何公共子串），模型没资料就编。而且"就近门店"必须靠客户位置，
+# 模型根本不知道客户在哪。修法：命中位置问法 → 代码直接答。
+#   带客户坐标（lat/lng，小程序 wx.getLocation 传来）→ 算最近门店推送；
+#   没坐标 → 报总店地址 + 说明 13 家分店 + 反问客户在哪个区/地标，别瞎猜。
+# 用正则收紧命中，避免误伤非位置问法：
+#   - 不匹配裸"导航"（"这车有导航吗"是车机导航，不是门店位置）
+#   - "最近/附近"后面必须跟"店/门店/家"（"最近有优惠吗/附近有充电桩吗"不拦）
+_LOC_RE = re.compile(
+    r'在哪里|在哪|在哪儿|什么位置|位置在|'
+    r'门店地址|店址|门店位置|店的地址|你们地址|地址是|地址在|地址发我|'
+    r'就近|最近.{0,4}(店|门店|家)|离我|附近.{0,4}(店|门店)|'
+    r'怎么走|怎么去|怎么过来|怎么过去|在哪条|'
+    r'导航到|导航过去|导航去|导航过来|导航一下'
+)
+
+def _is_location_question(q):
+    """客户是不是在问"你们店在哪 / 就近门店 / 附近有没有店"？"""
+    return bool(_LOC_RE.search(q))
+
+def _loc_store_line(s):
+    return f"【{s.get('name')}】{s.get('address')}，电话 {s.get('phone')}，营业 {s.get('hours', '每天 9:00-21:00')}"
+
+def _location_answer(question, lat=None, lng=None):
+    """位置问法的确定性回答（数据来自 data/stores.json，绝不编）"""
+    nearest, dist = _nearest_store(lat, lng) if (lat is not None and lng is not None) else (None, None)
+    if nearest:
+        dist_txt = f"（约 {dist:.1f} 公里）" if dist is not None else ""
+        return (f"离您最近的是{dist_txt}：{_loc_store_line(nearest)}。"
+                f"您点下方「到店」可以直接导航过来，或留个电话，我让店里同事把实车视频和路线发您。")
+    # 没定位 → 报总店 + 反问区，别瞎猜客户在哪
+    primary = next((s for s in STORES if s.get("primary")), STORES[0] if STORES else None)
+    if not primary:
+        return "门店信息还没填，老板去 data/stores.json 填一下。"
+    n = len(STORES)
+    return (f"本店是首驱南宁一网连锁，南宁市区共 {n} 家门店。总店在：{_loc_store_line(primary)}。"
+            f"其他区（江南/青秀/兴宁/西乡塘）也都有店。您靠近哪个区或哪个地标？告诉我，我帮您推最近的一家。")
 
 def _stock_answer_from_result(result, model_name):
     """把 CHECK_STOCK 工具结果转成给客户看的话术（确定性兜底，不再依赖模型自觉）"""
@@ -426,11 +514,12 @@ if SHUNT:
         return tokenizer.decode(out[0][ids['input_ids'].shape[1]:],
                                 skip_special_tokens=True).strip()
 
-def serve(question, log=True, return_tools=False, history=None):
+def serve(question, log=True, return_tools=False, history=None, lat=None, lng=None):
     """上线入口：分流器看门 → 检索 → 回答 → 挖金矿
     log=True 才写日志；--demo 演示模式不写，避免污染真实数据
     return_tools=True 时返回 (answer, used_tools)，给 API 层用（小程序要展示用了啥工具）
-    history: 多轮记忆 [(客户问题, 客服回答), ...]，让客服"记得"前面聊了什么"""
+    history: 多轮记忆 [(客户问题, 客服回答), ...]，让客服"记得"前面聊了什么
+    lat/lng: 客户坐标（小程序 wx.getLocation 传来），问"就近门店"时用来算最近门店"""
     if SHUNT:
         c = shunt_classify(question)
         if c == "拒客违规":   # 学徒直接挡下坏问题，老师傅不用出手
@@ -443,6 +532,11 @@ def serve(question, log=True, return_tools=False, history=None):
         if log:
             log_chat(question, answer, [], used_tools=["COMPETITOR_AVAIL"])
         return (answer, ["COMPETITOR_AVAIL"]) if return_tools else answer
+    if _is_location_question(question):  # 问"你们在哪/就近门店"→ 确定性推门店（v5.11 护栏）
+        answer = _location_answer(question, lat, lng)
+        if log:
+            log_chat(question, answer, [], used_tools=["LOCATION_ANSWER"])
+        return (answer, ["LOCATION_ANSWER"]) if return_tools else answer
     hits = retrieve(question)
     answer, used_tools = ask(question, hits, history=history)  # 检索不到也让守则+工具兜底（查库存/算账不依赖知识库）
     answer = _de_markdown(answer)  # 剥掉 Markdown 符号：聊天框是纯文本，不能给客户看 **点点**

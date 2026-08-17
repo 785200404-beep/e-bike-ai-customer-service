@@ -29,13 +29,39 @@ function detectModel(q) {
   return ''
 }
 
+// 客户是不是在问"你们店在哪 / 就近门店 / 附近有没有店"（和后端 _LOC_RE 保持一致）。
+// 用正则收紧：裸"导航"不拦（"这车有导航吗"是车机导航）；"最近/附近"后必须跟"店/门店/家"
+const LOC_RE = /在哪里|在哪|在哪儿|什么位置|位置在|门店地址|店址|门店位置|店的地址|你们地址|地址是|地址在|地址发我|就近|最近.{0,4}(店|门店|家)|离我|附近.{0,4}(店|门店)|怎么走|怎么去|怎么过来|怎么过去|在哪条|导航到|导航过去|导航去|导航过来|导航一下/
+function isLocationQuestion(q) {
+  return LOC_RE.test(q)
+}
+
+// 取客户定位（授权成功后回调坐标；拒绝/失败回调 null，不影响正常对话）
+function getUserLocation(cb) {
+  wx.getLocation({
+    type: 'gcj02',
+    success: (res) => cb && cb({ lat: res.latitude, lng: res.longitude }),
+    fail: () => cb && cb(null),
+  })
+}
+
+// 球面距离（公里）——"到店"列表按离客户远近排序
+function haversineKm(lat1, lng1, lat2, lng2) {
+  const R = 6371
+  const rad = x => x * Math.PI / 180
+  const dLat = rad(lat2 - lat1), dLng = rad(lng2 - lng1)
+  const a = Math.sin(dLat / 2) ** 2 +
+    Math.cos(rad(lat1)) * Math.cos(rad(lat2)) * Math.sin(dLng / 2) ** 2
+  return R * 2 * Math.asin(Math.sqrt(a))
+}
+
 Page({
   data: {
     messages: [
       {
         role: 'bot',
         welcome: true,
-        content: '📌 首驱电动车 · 南宁一网\n营业时间：每天 9:00-21:00，周末不休\n以旧换新：旧车抵 300-800 元 ｜ 代办上牌 50 元\n可问：价格、续航、库存、算账、售后、竞品对比',
+        content: '📌 首驱电动车 · 南宁一网\n营业时间：每天 9:00-21:00，周末不休\n以旧换新：旧车抵 300-800 元 ｜ 代办上牌 50 元\n可问：价格、续航、库存、算账、售后、竞品对比、门店位置',
         time: nowTime()
       }
     ],
@@ -50,24 +76,18 @@ Page({
       { action: 'store', label: '🏪 到店' },
       { action: 'lead', label: '📱 预约看车' },
     ],
-    // 门店信息 + 留资
+    // 门店列表（南宁一网 13 家）+ 留资
     showStore: false,
+    storeList: [],
     showLead: false,
     leadPhone: '',
     leadModel: '',
     leadSaving: false,
-    store: {},
   },
 
   onLoad() {
-    // 拉门店信息（地址/电话/营业时间），用于"到店"弹层
-    wx.request({
-      url: API + '/api/store',
-      success: (res) => {
-        const s = (res.data && res.data.store) || {}
-        if (s.name) this.setData({ store: s })
-      },
-    })
+    // 预热门店列表（地址/电话/营业时间），点"到店"直接用
+    this.fetchStoreList()
   },
 
   noop() {},
@@ -94,15 +114,26 @@ Page({
     this.setData({ messages, draft: '', loading: true })
     this.lastModel = detectModel(q) || this.lastModel || ''
 
+    // 问"就近/在哪"时先取定位，让客服能算"最近的门店"；取不到就照常发
+    if (isLocationQuestion(q)) {
+      getUserLocation((loc) => this.doRequest(q, loc))
+    } else {
+      this.doRequest(q, null)
+    }
+  },
+
+  doRequest(q, loc) {
+    const data = { question: q, session_id: getSessionId() }
+    if (loc) { data.lat = loc.lat; data.lng = loc.lng }
     wx.request({
       url: API + '/api/chat',
       method: 'POST',
       header: { 'Content-Type': 'application/json' },
-      data: { question: q, session_id: getSessionId() },
+      data: data,
       success: (res) => {
-        const data = res.data || {}
-        let answer = data.answer || ''
-        const tools = data.used_tools || []
+        const d = res.data || {}
+        let answer = d.answer || ''
+        const tools = d.used_tools || []
         if (tools.length) {
           const names = tools.map(t => (t.includes('计算器') ? '🧮 算账' : '📦 查库存')).join('、')
           answer += '\n\n（已用工具：' + names + '）'
@@ -125,37 +156,53 @@ Page({
     })
   },
 
-  // —— 到店 / 留资（P0：邀约到店 + 抓潜在客户）——
+  // —— 到店（南宁一网 13 家，按离客户远近排）+ 留资（P0：邀约到店 + 抓潜在客户）——
+  fetchStoreList() {
+    wx.request({
+      url: API + '/api/store',
+      success: (res) => {
+        const list = (res.data && res.data.stores) || []
+        if (list.length) this.setData({ storeList: list })
+      },
+    })
+  },
+
   showStore() {
-    if (this.data.store.name) {
-      this.setData({ showStore: true })
-    } else {
-      wx.request({
-        url: API + '/api/store',
-        success: (res) => {
-          const s = (res.data && res.data.store) || {}
-          if (s.name) this.setData({ store: s, showStore: true })
-          else wx.showToast({ title: '门店信息还没填，老板去 data/store.json 填', icon: 'none' })
-        },
-      })
+    if (!this.data.storeList.length) {
+      wx.showToast({ title: '门店信息还没填，老板去 data/stores.json 填', icon: 'none' })
+      return
     }
+    // 有定位就按距离排，让"最近的门店"排最前
+    getUserLocation((loc) => {
+      let list = this.data.storeList
+      if (loc) {
+        list = list.map(s => {
+          const d = haversineKm(loc.lat, loc.lng, s.lat, s.lng)
+          return Object.assign({}, s, { dist: d })
+        }).sort((a, b) => (a.dist - b.dist))
+      }
+      this.setData({ storeList: list, showStore: true })
+    })
   },
   hideStore() { this.setData({ showStore: false }) },
-  callStore() {
-    const phone = this.data.store.phone
+  callStore(e) {
+    const phone = e.currentTarget.dataset.phone
     if (!phone || phone.indexOf('0000000') >= 0) {
       wx.showToast({ title: '门店电话还没填', icon: 'none' })
       return
     }
     wx.makePhoneCall({ phoneNumber: phone.replace(/-/g, '') })
   },
-  navigateStore() {
-    const s = this.data.store
-    if (!s.lat || !s.lng) {
-      wx.showToast({ title: '门店位置还没填', icon: 'none' })
+  navigateStore(e) {
+    const { lat, lng, name, address } = e.currentTarget.dataset
+    if (!lat || !lng) {
+      wx.showToast({ title: '门店位置还没填，老板去 data/stores.json 填', icon: 'none' })
       return
     }
-    wx.openLocation({ latitude: s.lat, longitude: s.lng, name: s.name, address: s.address })
+    wx.openLocation({
+      latitude: Number(lat), longitude: Number(lng),
+      name: name || '首驱门店', address: address || '',
+    })
   },
 
   showLead() {

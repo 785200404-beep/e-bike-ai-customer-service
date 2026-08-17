@@ -125,6 +125,13 @@
     box-shadow: 0 2px 6px rgba(255, 90, 31, .3);
   }
   .sheet-close { text-align: center; color: #999; font-size: 13px; margin-top: 12px; cursor: pointer; }
+  .overlay .sheet.store-sheet { max-height: 78vh; display: flex; flex-direction: column; }
+  .store-list { flex: 1; overflow-y: auto; max-height: 60vh; }
+  .store-item { border-bottom: 1px solid #f2f2f2; padding: 10px 2px 12px; }
+  .store-item:last-child { border-bottom: none; }
+  .store-item .st-name { font-size: 15px; font-weight: 600; margin-bottom: 4px; color: #333; }
+  .store-item .st-line { font-size: 13px; color: #555; line-height: 1.5; margin-bottom: 3px; }
+  .store-item .sheet-btns { margin-top: 8px; }
 </style>
 </head>
 <body>
@@ -151,17 +158,11 @@
   <button id="send" disabled>发送</button>
 </footer>
 
-<!-- 门店信息弹层 -->
+<!-- 门店信息弹层：南宁一网 13 家，按离客户远近排序 -->
 <div class="overlay" id="storeModal">
-  <div class="sheet">
-    <div class="sheet-title" id="st_name">🏪 首驱电动车 · 南宁一网门店</div>
-    <div class="sheet-line" id="st_addr"></div>
-    <div class="sheet-line" id="st_hours"></div>
-    <div class="sheet-line" id="st_phone"></div>
-    <div class="sheet-btns">
-      <button class="sheet-btn primary" id="st_call">📞 拨打电话</button>
-      <button class="sheet-btn" id="st_nav">🗺️ 导航到店</button>
-    </div>
+  <div class="sheet store-sheet">
+    <div class="sheet-title">🏪 首驱门店 · 南宁一网</div>
+    <div class="store-list" id="st_list"></div>
     <div class="sheet-close" id="st_close">关闭</div>
   </div>
 </div>
@@ -296,21 +297,53 @@
 
   // —— 门店信息 + 留资（P0：邀约到店 / 抓潜在客户）——
   var store = null;
+  var stores = [];
   var lastModel = '';
   function fetchStore(cb) {
     if (store) { cb && cb(); return; }
     fetch('/api/store').then(function (r) { return r.json(); }).then(function (d) {
       store = d.store || {};
+      stores = d.stores || [];
       cb && cb();
-    }).catch(function () { store = {}; cb && cb(); });
+    }).catch(function () { store = {}; stores = []; cb && cb(); });
+  }
+  function haversineKm(a, b, c, d) {
+    var R = 6371, rad = function (x) { return x * Math.PI / 180; };
+    var dl = rad(d - b), dp = rad(c - a);
+    var x = Math.sin(dp / 2) * Math.sin(dp / 2) +
+      Math.cos(rad(a)) * Math.cos(rad(c)) * Math.sin(dl / 2) * Math.sin(dl / 2);
+    return R * 2 * Math.asin(Math.sqrt(x));
+  }
+  function stRow(s) {
+    return '<div class="store-item">' +
+      '<div class="st-name">' + (s.name || '首驱门店') +
+      (s._dist != null ? ' · 距您 ' + s._dist.toFixed(1) + 'km' : '') + '</div>' +
+      '<div class="st-line">📍 ' + (s.address || '') + '</div>' +
+      '<div class="st-line">🕘 ' + (s.hours || '每天 9:00-21:00，周末不休') + '</div>' +
+      '<div class="st-line">📞 ' + (s.phone || '') + '</div>' +
+      '<div class="sheet-btns">' +
+      '<button class="sheet-btn primary" data-phone="' + (s.phone || '') + '">📞 拨打电话</button>' +
+      '<button class="sheet-btn" data-lat="' + s.lat + '" data-lng="' + s.lng + '" data-name="' + (s.name || '首驱门店') + '">🗺️ 导航</button>' +
+      '</div></div>';
   }
   function openStore() {
     fetchStore(function () {
-      document.getElementById('st_name').textContent = '🏪 ' + (store.name || '首驱门店');
-      document.getElementById('st_addr').textContent = '📍 ' + (store.address || '');
-      document.getElementById('st_hours').textContent = '🕘 ' + (store.hours || '');
-      document.getElementById('st_phone').textContent = '📞 ' + (store.phone || '');
-      document.getElementById('storeModal').style.display = 'flex';
+      var list = stores.length ? stores.slice() : [store];
+      var render = function () {
+        document.getElementById('st_list').innerHTML = list.length
+          ? list.map(stRow).join('')
+          : '<div class="empty">门店信息还没填，老板去 data/stores.json 填。</div>';
+        document.getElementById('storeModal').style.display = 'flex';
+      };
+      // 有定位就按距离排（最近的在最上面）；拿不到定位就照原顺序
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(function (pos) {
+          var lat = pos.coords.latitude, lng = pos.coords.longitude;
+          list.forEach(function (s) { s._dist = haversineKm(lat, lng, Number(s.lat), Number(s.lng)); });
+          list.sort(function (a, b) { return a._dist - b._dist; });
+          render();
+        }, render);
+      } else { render(); }
     });
   }
   function closeStore() { document.getElementById('storeModal').style.display = 'none'; }
@@ -336,16 +369,20 @@
     }).catch(function () { alert('连不上后端'); })
       .finally(function () { btn.disabled = false; btn.textContent = '提交，门店会联系您'; });
   }
-  // 弹层关闭 / 拨号 / 导航
+  // 弹层关闭 / 门店列表里的拨号 / 导航（事件委托）
   document.getElementById('st_close').addEventListener('click', closeStore);
   document.getElementById('lead_close').addEventListener('click', closeLead);
-  document.getElementById('st_call').addEventListener('click', function () {
-    if (store.phone) location.href = 'tel:' + store.phone;
-  });
-  document.getElementById('st_nav').addEventListener('click', function () {
-    var url = 'https://uri.amap.com/marker?position=' + store.lng + ',' + store.lat +
-      '&name=' + encodeURIComponent(store.name || '首驱门店');
-    window.open(url, '_blank');
+  document.getElementById('st_list').addEventListener('click', function (e) {
+    var btn = e.target.closest('button');
+    if (!btn) return;
+    var phone = btn.getAttribute('data-phone');
+    if (phone) { location.href = 'tel:' + phone; return; }
+    var lat = btn.getAttribute('data-lat'), lng = btn.getAttribute('data-lng');
+    if (lat && lng) {
+      var url = 'https://uri.amap.com/marker?position=' + lng + ',' + lat +
+        '&name=' + encodeURIComponent(btn.getAttribute('data-name') || '首驱门店');
+      window.open(url, '_blank');
+    }
   });
   document.getElementById('lead_submit').addEventListener('click', submitLead);
   // 点遮罩空白处关闭

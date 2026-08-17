@@ -29,17 +29,23 @@
     <button class="send" bindtap="onSend" disabled="{{loading}}">发送</button>
   </view>
 
-  <!-- 门店信息弹层 -->
+  <!-- 门店信息弹层：南宁一网 13 家，按离客户远近排序，每家可拨号/导航 -->
   <view class="overlay" wx:if="{{showStore}}" bindtap="hideStore">
-    <view class="sheet" catchtap="noop">
-      <view class="sheet-title">🏪 {{store.name}}</view>
-      <view class="sheet-line">📍 {{store.address}}</view>
-      <view class="sheet-line">🕘 {{store.hours}}</view>
-      <view class="sheet-line">📞 {{store.phone}}</view>
-      <view class="sheet-btns">
-        <button class="sheet-btn primary" bindtap="callStore">📞 拨打电话</button>
-        <button class="sheet-btn" bindtap="navigateStore">🗺️ 导航到店</button>
-      </view>
+    <view class="sheet store-sheet" catchtap="noop">
+      <view class="sheet-title">🏪 首驱门店 · 南宁一网</view>
+      <scroll-view class="store-list" scroll-y="true">
+        <view class="store-item" wx:for="{{storeList}}" wx:key="name">
+          <view class="store-name">{{item.name}}{{item.dist != null ? ' · 距您 ' + item.dist.toFixed(1) + 'km' : ''}}</view>
+          <view class="store-line">📍 {{item.address}}</view>
+          <view class="store-line">🕘 {{item.hours || '每天 9:00-21:00，周末不休'}}</view>
+          <view class="store-line">📞 {{item.phone}}</view>
+          <view class="sheet-btns">
+            <button class="sheet-btn primary" data-phone="{{item.phone}}" bindtap="callStore">📞 拨打电话</button>
+            <button class="sheet-btn" data-lat="{{item.lat}}" data-lng="{{item.lng}}"
+                    data-name="{{item.name}}" data-address="{{item.address}}" bindtap="navigateStore">🗺️ 导航</button>
+          </view>
+        </view>
+      </scroll-view>
       <view class="sheet-close" bindtap="hideStore">关闭</view>
     </view>
   </view>

@@ -8,6 +8,12 @@
     "navigationBarTextStyle": "white",
     "backgroundColor": "#f6f7f9"
   },
+  "permission": {
+    "scope.userLocation": {
+      "desc": "用于帮您找最近的首驱门店，和导航到店"
+    }
+  },
+  "requiredPrivateInfos": ["getLocation"],
   "style": "v2",
   "sitemapLocation": "sitemap.json"
 }

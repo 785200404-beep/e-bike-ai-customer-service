@@ -287,3 +287,39 @@
   margin-top: 22rpx;
   padding: 8rpx 0;
 }
+
+/* —— 门店列表弹层（南宁一网 13 家） —— */
+.store-sheet {
+  max-height: 78vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.store-list {
+  flex: 1;
+  max-height: 60vh;
+}
+
+.store-item {
+  border-bottom: 1rpx solid #f2f2f2;
+  padding: 20rpx 4rpx 24rpx;
+}
+
+.store-item:last-child {
+  border-bottom: none;
+}
+
+.store-name {
+  font-size: 30rpx;
+  font-weight: 600;
+  color: #333;
+  margin-bottom: 8rpx;
+}
+
+.store-line {
+  font-size: 26rpx;
+  color: #555;
+  line-height: 1.5;
+  margin-bottom: 6rpx;
+  word-break: break-all;
+}

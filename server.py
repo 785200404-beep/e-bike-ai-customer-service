@@ -73,7 +73,13 @@ def chat():
     sid = (data.get("session_id") or "default").strip() or "default"
 
     history = SESSIONS.get(sid, [])[-MAX_HISTORY_ROUNDS:]
-    answer, used_tools = cs.serve(q, return_tools=True, history=history)
+    # 小程序可能带客户坐标（wx.getLocation）→ 问"就近门店"时算最近门店
+    try:
+        lat = float(data.get("lat")) if data.get("lat") is not None else None
+        lng = float(data.get("lng")) if data.get("lng") is not None else None
+    except (TypeError, ValueError):
+        lat = lng = None
+    answer, used_tools = cs.serve(q, return_tools=True, history=history, lat=lat, lng=lng)
     # 存历史：只存"最终问答对"，工具内部往返（CALC/CHECK_STOCK）不进历史
     SESSIONS[sid] = (SESSIONS.get(sid, []) + [(q, answer)])[-MAX_HISTORY_ROUNDS:]
     if len(SESSIONS) > MAX_SESSIONS:  # 简单防内存泄漏：丢最早写入的会话
@@ -111,9 +117,16 @@ def lead():
 # ============ 门店信息（小程序/网页版取来展示，不含 admin_key） ============
 @app.get("/api/store")
 def store():
+    """返回：store=总店（老板看板可编辑）、stores=南宁一网 13 家全量（data/stores.json）。
+    小程序"到店"弹层按 stores 列表展示；admin_key 一律不外泄。"""
     s = dict(_get_store())
     s.pop("admin_key", None)
-    return jsonify({"ok": True, "store": s})
+    # 全量门店清单（13 家）——只给前端展示用的字段
+    branches = []
+    for st in cs.STORES:
+        item = {k: st.get(k) for k in ("name", "area", "address", "phone", "hours", "lat", "lng", "primary")}
+        branches.append(item)
+    return jsonify({"ok": True, "store": s, "stores": branches})
 
 
 @app.post("/api/store")
