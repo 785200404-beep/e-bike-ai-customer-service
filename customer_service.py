@@ -338,15 +338,19 @@ def _competitor_avail(question):
             return name
     return None
 
-# ============ 4.75 门店位置/就近门店确定性护栏（v5.11） ============
+# ============ 4.75 门店位置/就近门店确定性护栏（v5.11，v5.19 加区/路/店名结构化） ============
 # 背景：客户问"你们在哪里 / 就近门店 / 附近有没有店"时，n-gram 检索捞不到门店地址行
 # （"你们在哪里"和地址文本没有任何公共子串），模型没资料就编。而且"就近门店"必须靠客户位置，
 # 模型根本不知道客户在哪。修法：命中位置问法 → 代码直接答。
 #   带客户坐标（lat/lng，小程序 wx.getLocation 传来）→ 算最近门店推送；
 #   没坐标 → 报总店地址 + 说明 13 家分店 + 反问客户在哪个区/地标，别瞎猜。
+#   v5.19：客户问"XX区/XX路/XX店 有店吗"（如"青秀区有店吗""双拥路有店吗"）→
+#   按区/路/店名确定性列出门店，统一"位置/门店/电话"三段式（老板定的格式），不再让模型自由发挥成一段话；
+#   良庆/邕宁等没店的区 → 如实说没有 + 反问靠近哪个区。
 # 用正则收紧命中，避免误伤非位置问法：
 #   - 不匹配裸"导航"（"这车有导航吗"是车机导航，不是门店位置）
 #   - "最近/附近"后面必须跟"店/门店/家"（"最近有优惠吗/附近有充电桩吗"不拦）
+#   - 区名/店名命中还要配合位置词，并排除库存/价格/售后/充电（"青秀区双拥一店有现货吗"是库存问题）
 _LOC_RE = re.compile(
     r'在哪里|在哪|在哪儿|什么位置|位置在|'
     r'门店地址|店址|门店位置|店的地址|你们地址|地址是|地址在|地址发我|'
@@ -355,14 +359,65 @@ _LOC_RE = re.compile(
     r'导航到|导航过去|导航去|导航过来|导航一下'
 )
 
+_NAN_DISTRICTS = ("西乡塘", "江南", "青秀", "兴宁", "良庆", "邕宁", "武鸣")
+
+def _loc_keyword(q):
+    """客户问的位置关键词：区名（有店/没店都认，如"青秀""良庆"）或门店名前缀（"双拥"命中双拥一/二店）。
+    返回关键词或 None；调用方再配合位置词判断是不是真问位置（防"青秀区双拥一店有现货吗"被劫走）。"""
+    for d in _NAN_DISTRICTS:
+        if d in q:
+            return d
+    prefixes = set()
+    for s in STORES:
+        name = (s.get("name") or "").replace("店", "")   # 双拥一、江南一、仙葫一
+        if name:
+            prefixes.add(name)
+            if len(name) >= 2:
+                prefixes.add(name[:-1])                    # 双拥、江南、仙葫
+    for p in sorted(prefixes, key=len, reverse=True):
+        if p and p in q:
+            return p
+    return None
+
+_LOC_POS_RE = re.compile(r'有店|有门店|有没有店|在哪|在哪里|位置|门店|店址|怎么走|怎么去|怎么到|导航|哪里有|店在哪|在哪条')
+_LOC_NOT_RE = re.compile(r'现货|库存|有货|有现车|价格|多少钱|能提|提车|售后|维修|保修|以旧换新|上牌|牌照|充电')
+
 def _is_location_question(q):
-    """客户是不是在问"你们店在哪 / 就近门店 / 附近有没有店"？"""
-    return bool(_LOC_RE.search(q))
+    """客户是不是在问"你们店在哪 / 就近门店 / 附近有没有店 / XX区有店吗"？
+    区名/店名命中还要配合位置词（有店/在哪/门店…），并排除库存/价格/售后类，别劫走别的问题。"""
+    if _LOC_RE.search(q):
+        return True
+    if not _loc_keyword(q):
+        return False
+    if _LOC_NOT_RE.search(q):   # "青秀区双拥一店有现货吗"是库存问题，不是位置问题
+        return False
+    return bool(_LOC_POS_RE.search(q))
+
+def _loc_store_block(s):
+    """门店结构化三段（老板定的格式）：位置/门店/电话"""
+    return (f"位置：{s.get('address')}\n"
+            f"门店：{s.get('name')}\n"
+            f"电话：{s.get('phone')}")
 
 def _loc_store_line(s):
-    """门店一句话简介：店长 + 地址 + 电话 + 营业时间"""
+    """门店一句话简介（老格式，保留备用）：店长 + 地址 + 电话 + 营业时间"""
     c = f"店长 {s['contact']}，" if s.get("contact") else ""
     return f"【{s.get('name')}】{s.get('address')}，{c}电话 {s.get('phone')}，营业 {s.get('hours') or '每天 9:00-21:00'}"
+
+def _stores_by_keyword(kw):
+    """门店列表：名字/地址/所属区含 kw 的所有店（13 家小表，顺序即文件顺序）"""
+    return [s for s in STORES
+            if kw in (s.get("name") or "") or kw in (s.get("address") or "") or kw in (s.get("area") or "")]
+
+def _loc_list_answer(kw, stores):
+    """按"区/路/店名"列门店（结构化 位置/门店/电话）；没店如实说 + 反问区"""
+    if not stores:
+        return (f"{kw}这边目前没有首驱门店。南宁市区有店的是西乡塘、江南、青秀、兴宁四个区，"
+                f"您靠近哪个区或哪个地标？我帮您推最近的一家。")
+    suffix = "区" if kw in _NAN_DISTRICTS else ""
+    return (f"{kw}{suffix}有 {len(stores)} 家店：\n"
+            + "\n".join(_loc_store_block(s) for s in stores)
+            + "\n点下面的「导航到店」可直达。需要我帮您确认具体位置吗？")
 
 _AFTER_SALES_RE = re.compile(r'售后|维修|修车|保养')
 def _is_after_sales_question(q):
@@ -376,8 +431,7 @@ def _after_sales_answer():
     s = _after_sales_store()
     if not s:
         return "售后信息还没填，老板去 data/stores.json 的 after_sales 填一下。"
-    c = f"店长 {s['contact']}，" if s.get("contact") else ""
-    return (f"首驱售后总部：{s.get('address')}，{c}电话 {s.get('phone')}。"
+    return (f"首驱售后总部：\n位置：{s.get('address')}\n门店：{s.get('name')}\n电话：{s.get('phone')}\n"
             f"点下面的「导航到店」可直达，或先打售后电话 {s.get('phone')}。")
 
 # ============ 4.8 跑外卖/跑单选车确定性护栏（v5.14） ============
@@ -455,17 +509,22 @@ def _delivery_answer(question, history=None):
 
 def _location_answer(question, lat=None, lng=None):
     """位置问法的确定性回答（数据来自 data/stores.json，绝不编）"""
+    kw = _loc_keyword(question)
+    if kw:  # 问"XX区/XX路/XX店 有店吗" → 直接结构化列该位置的门店（不再让模型自由发挥）
+        return _loc_list_answer(kw, _stores_by_keyword(kw))
     nearest, dist = _nearest_store(lat, lng) if (lat is not None and lng is not None) else (None, None)
     if nearest:
         dist_txt = f"（约 {dist:.1f} 公里）" if dist is not None else ""
-        return (f"离您最近的是{dist_txt}：{_loc_store_line(nearest)}。"
+        return (f"离您最近的是：{nearest.get('name')}{dist_txt}\n"
+                f"{_loc_store_block(nearest)}\n"
                 f"点下面的「导航到店」直接过去，或留个电话，我让店里同事把实车视频和路线发您。")
     # 没定位 → 报总店 + 反问区，别瞎猜客户在哪
     primary = next((s for s in STORES if s.get("primary")), STORES[0] if STORES else None)
     if not primary:
         return "门店信息还没填，老板去 data/stores.json 填一下。"
     n = len(STORES)
-    return (f"本店是首驱南宁一网连锁，南宁市区共 {n} 家门店。总店在：{_loc_store_line(primary)}。"
+    return (f"本店是首驱南宁一网连锁，南宁市区共 {n} 家门店。总店在：\n"
+            f"{_loc_store_block(primary)}\n"
             f"点下面的「导航到店」可以直接导航过去。其他区（江南/青秀/兴宁/西乡塘）也都有店，"
             f"您靠近哪个区或哪个地标？告诉我，我帮您推最近的一家。")
 
@@ -492,6 +551,11 @@ def map_link_for(question, lat=None, lng=None):
         return None
     if _is_after_sales_question(question):  # 问"售后/维修在哪" → 售后总部（独立于 13 家门店）
         return _map_link_of(_after_sales_store())
+    kw = _loc_keyword(question)
+    if kw:  # 问"青秀区有店吗/双拥路有店吗" → 地图指到该位置第一家店（和答案列表一致）
+        stores = _stores_by_keyword(kw)
+        if stores:
+            return _map_link_of(stores[0])
     nearest, _ = _nearest_store(lat, lng) if (lat is not None and lng is not None) else (None, None)
     s = nearest or next((x for x in STORES if x.get("primary")), STORES[0] if STORES else None)
     return _map_link_of(s)
