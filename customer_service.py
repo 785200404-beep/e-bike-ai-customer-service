@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""电动车店智能客服 —— v5.2（分流看门 + RAG 查产品 + 计算器 + 查库存[指定/反问] + 售后兜底 + 挖金矿日志）
+"""电动车店智能客服 —— v5.20（分流看门 + RAG 查产品 + 计算器 + 查库存[指定/反问] + 售后兜底 + 南宁在售车型护栏 + 挖金矿日志）
 老师傅可换云端（LLM=dashscope 时走通义千问 API），分流器学徒始终留本地 0.6B——第8课模型路由：简单给学徒、难给老师傅。
 用法：
     python customer_service.py --demo   # 跑几个预设问题看效果（不写日志）
@@ -117,7 +117,7 @@ def retrieve(question, top_n=8):
 _STOCK_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "stock.json")
 _DEFAULT_STOCK = {
     "Sz Lite": 5, "Sz110": 3, "K95C Max": 2,
-    "Y3 95C MK2": 0, "S300 Ultra": 0,  # S300 Plus 已并入 Ultra（2026-08-16 产品手册同步）
+    "Y3 95C MK2": 0,  # 南宁门店只卖 12 款；S300 Ultra 南宁没有，不再列库存
 }
 STOCK = dict(_DEFAULT_STOCK)
 
@@ -338,6 +338,68 @@ def _competitor_avail(question):
             return name
     return None
 
+# ============ 4.76 南宁门店在售车型护栏（v5.20） ============
+# 背景：老板确认南宁一网只卖 12 款（2026-08-17）。知识库还有品牌全系/外地的车
+# （S300/Sz5/K1/K3/O系/Yz/Kz3/Oz/K5/T30…），客户问这些不能报价格报参数——南宁门店没有在售。
+# 修法：命中"首驱 + 非在售车型"（对比/外卖/售后问法除外）→ 确定性答"南宁门店没有在售" + 列 12 款。
+#   外卖有专门护栏（外卖-推荐车型只推南宁在售款）；对比题要拿 S300 这类旗舰去和九号比，不能劫走。
+_NANNING_KB_NAMES = {_norm(n) for n in (
+    "Y3 70C", "Y3 85C NEW", "Y3 95C", "Y3 95C MK2",
+    "K85C", "K95C", "K95C MAX",
+    "Sz Lite", "Sz 110", "Kz lite",   # Sz Lite 含金属版/大众版，Sz 110 即锂电版，Kz lite 即 Kz Lite
+)}
+# 客户常问的"非在售款"缩写/系列名（价目表里没有独立行时兜底用）：
+# 比如"首驱K1 95CV MAX"能捞出全名直接拦；只有"首驱K1/Sz5/O5"这类没全名的才轮到这组。
+# 注意别放"kz"——Kz Lite 南宁在售，只放 Kz3/Kz 110 这类非在售款。
+_NON_NANNING_SHORT = ["S300", "Sz5", "K1", "K3", "K5", "O1", "O5", "Yz", "Oz",
+                      "Kz3", "Kz 110", "T30", "暴风者"]
+
+_COMPARE_RE = re.compile(
+    r'哪个好|哪个强|哪个猛|哪个值|哪个划算|怎么选|怎么挑|怎么比|'
+    r'和.{0,15}[比比较]|跟.{0,15}[比比较]|与.{0,15}[比比较]|'
+    r'\bvs\b|对比|比一比|谁好|谁强|好还是'
+)
+
+def _is_compare_question(q):
+    """是不是"对比/选哪个"问法？是 → 别拿"非在售"护栏劫走（S300 也要能拿去和九号 E300P 比）"""
+    return bool(_COMPARE_RE.search(q))
+
+_LINEUP_LIST_RE = re.compile(r'有哪些车|有什么车|有哪些车型|在售车型|都卖什么|有哪几款|都有什么车|卖哪些车|店里卖什么')
+
+def _is_lineup_list_question(q):
+    """问"店里有哪些车型/在售车型"？→ 直接列南宁 12 款（不劳烦模型，防它把品牌全系都抖出来）"""
+    return bool(_LINEUP_LIST_RE.search(q))
+
+def _lineup_list_text():
+    """南宁在售 12 款（老板定的分档+命名，2026-08-17）"""
+    return ("轻摩（需F照，上蓝牌）：Y3 70C、Y3 85C NEW\n"
+            "电摩（需E/D照，上黄牌）：Y3 95C、Y3 95C MK2、K85C、K95C、K95C MAX\n"
+            "电动自行车（新国标免驾照，上蓝牌）：Sz Lite（金属版）、Sz Lite（大众版）、Sz 110（锂电版）、Kz Lite")
+
+def _lineup_list_answer():
+    return ("南宁门店目前在售的车型有 12 款：\n" + _lineup_list_text() +
+            "\n您想了解哪款？我帮您查价格、续航和库存。")
+
+def _non_lineup_model(question):
+    """问的是"首驱 + 南宁不在售的车型"吗？返回车型名（如 'S300 Ultra'/'K1'），否则 None。
+    对比/外卖/售后问法不拦（外卖走外卖护栏、售后走售后护栏，S300 也能拿去和九号对比）。"""
+    if _is_compare_question(question) or _is_after_sales_question(question):
+        return None
+    m = _extract_kb_model(question)
+    if m and _norm(m) not in _NANNING_KB_NAMES:
+        return m
+    nq = _norm(question)
+    for code in sorted(_NON_NANNING_SHORT, key=len, reverse=True):
+        if _norm(code) in nq:
+            return code
+    return None
+
+def _lineup_answer(m):
+    """非南宁在售款 → 如实说没有 + 列 12 款 + 反问（不报价格不报参数）"""
+    return (f"首驱{m} 南宁门店没有在售——这款是品牌全系或外地才有的车。\n"
+            f"南宁一网门店目前在售的车型有 12 款：\n{_lineup_list_text()}\n"
+            f"您想看哪款？我帮您查价格、续航和库存。")
+
 # ============ 4.75 门店位置/就近门店确定性护栏（v5.11，v5.19 加区/路/店名结构化） ============
 # 背景：客户问"你们在哪里 / 就近门店 / 附近有没有店"时，n-gram 检索捞不到门店地址行
 # （"你们在哪里"和地址文本没有任何公共子串），模型没资料就编。而且"就近门店"必须靠客户位置，
@@ -456,12 +518,11 @@ def _kb_spec_line(name):
     return ""
 
 def _delivery_reco():
-    """没点名车型 → 按日里程分档推荐（车型/参数照价目表原文，绝不编）"""
+    """没点名车型 → 按日里程分档推荐（只推南宁在售款，车型/参数照价目表原文，绝不编）"""
     return (
-        "能跑，外卖完全够用——关键是按一天跑的里程选对车（外卖天天高强度骑，别只看纸面续航，要留 20% 余量）：\n"
+        "选外卖车关键是按一天跑的里程选对车（外卖天天高强度骑，别只看纸面续航，要留 20% 余量）：\n"
         "· 市区短途（一天 60 公里内）：新国标电自免驾照、上蓝牌——首驱Sz 110（48V30Ah锂电，续航110km，5199元）\n"
-        "· 跑得远（一天 60-100 公里）：选电摩，但要考驾照、上黄牌——首驱K1 95CV MAX（72V32Ah，等速续航90km，极速73）"
-        "、首驱Y3 95C MK2（72V32Ah，等速续航100km，6999元）\n"
+        "· 跑得远（一天 60-100 公里）：选电摩，但要考驾照、上黄牌——首驱Y3 95C MK2（72V32Ah，等速续航100km，6999元）\n"
         "· 要极速、接长途大单：首驱K95C MAX（72V32Ah，全速续航82km，极速70，6699元）\n"
         "另外：满载爬坡、手机充电都会掉电；天天骑磨损快，售后近很关键——首驱有专门售后总部"
         "（中华路133号东湖宾馆负一楼），各门店也能帮忙对接售后。"
@@ -470,6 +531,9 @@ def _delivery_reco():
 
 def _delivery_for_model(m):
     """客户点名具体车型 → 按这款车实际情况答（照价目表，不编）"""
+    if m and _norm(m) not in _NANNING_KB_NAMES:  # 南宁不在售的款，别顺着参数往下答
+        return (f"您问的首驱{m}，南宁门店没有在售——这款是品牌全系或外地才有的车。\n"
+                f"跑外卖给您推荐南宁在售的几款：\n" + _delivery_reco())
     spec = _kb_spec_line(m)
     if spec and "：" in spec:  # 剥掉 "首驱 Sz 110：" 前缀，只留参数部分
         spec = spec.split("：", 1)[1].strip()
@@ -754,6 +818,17 @@ def serve(question, log=True, return_tools=False, history=None, lat=None, lng=No
         if log:
             log_chat(question, answer, [], used_tools=["DELIVERY_ANSWER"])
         return (answer, ["DELIVERY_ANSWER"]) if return_tools else answer
+    if _is_lineup_list_question(question):  # 问"有哪些车型/在售车型"→ 列南宁 12 款（v5.20 护栏）
+        answer = _lineup_list_answer()
+        if log:
+            log_chat(question, answer, [], used_tools=["LINEUP_LIST_ANSWER"])
+        return (answer, ["LINEUP_LIST_ANSWER"]) if return_tools else answer
+    nl = _non_lineup_model(question)  # 问"首驱非南宁在售车型"→ 南宁门店没有在售（v5.20 护栏）
+    if nl:
+        answer = _lineup_answer(nl)
+        if log:
+            log_chat(question, answer, [], used_tools=["LINEUP_GUARD"])
+        return (answer, ["LINEUP_GUARD"]) if return_tools else answer
     if _is_location_question(question):  # 问"你们在哪/就近门店"→ 确定性推门店（v5.11 护栏）
         if _is_after_sales_question(question):  # 问"售后/维修在哪"→ 报售后总部（v5.13）
             answer = _after_sales_answer()
